@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kajola — Production Platform Architect Skill</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Syne:wght@400;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --ink:      #0B0705;
+      --ink-2:    #140E0A;
+      --ink-3:    #1C1510;
+      --amber:    #D9922A;
+      --amber-lt: #F0B455;
+      --terra:    #B85C2E;
+      --cream:    #F0E6CF;
+      --cream-dim:#A89070;
+      --green:    #3D7A5E;
+      --mono:     'JetBrains Mono', monospace;
+      --serif:    'Cormorant Garamond', Georgia, serif;
+      --sans:     'Syne', sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--ink);
+      color: var(--cream);
+      font-family: var(--sans);
+      overflow-x: hidden;
+      cursor: default;
+    }
+
+    /* ── GEOMETRIC BACKGROUND PATTERN ───────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        repeating-linear-gradient(
+          45deg,
+          transparent,
+          transparent 40px,
+          rgba(217,146,42,.03) 40px,
+          rgba(217,146,42,.03) 41px
+        ),
+        repeating-linear-gradient(
+          -45deg,
+          transparent,
+          transparent 40px,
+          rgba(217,146,42,.03) 40px,
+          rgba(217,146,42,.03) 41px
+        );
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── NAV ──────────────────────────────────────────────────── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 48px;
+      background: rgba(11,7,5,.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(217,146,42,.12);
+      z-index: 100;
+    }
+    .nav-logo {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: 1.15rem;
+      letter-spacing: .08em;
+      color: var(--amber);
+      text-decoration: none;
+    }
+    .nav-logo span { color: var(--cream); }
+    nav ul {
+      list-style: none;
+      display: flex;
+      gap: 36px;
+    }
+    nav ul a {
+      color: var(--cream-dim);
+      text-decoration: none;
+      font-size: .8rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      transition: color .2s;
+    }
+    nav ul a:hover { color: var(--amber-lt); }
+    .nav-cta {
+      background: var(--amber);
+      color: var(--ink) !important;
+      padding: 8px 20px;
+      border-radius: 3px;
+      font-weight: 700 !important;
+    }
+    .nav-cta:hover { background: var(--amber-lt) !important; color: var(--ink) !important; }
+
+    /* ── HERO ─────────────────────────────────────────────────── */
+    .hero {
+      position: relative;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 120px 48px 80px;
+      text-align: center;
+      overflow: hidden;
+      z-index: 1;
+    }
+
+    /* Kente-inspired decorative border top */
+    .hero::after {
+      content: '';
+      position: absolute;
+      top: 80px; left: 0; right: 0;
+      height: 4px;
+      background: repeating-linear-gradient(
+        90deg,
+        var(--amber) 0px, var(--amber) 16px,
+        var(--terra) 16px, var(--terra) 32px,
+        var(--green) 32px, var(--green) 48px,
+        var(--ink-3) 48px, var(--ink-3) 64px
+      );
+    }
+
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(217,146,42,.1);
+      border: 1px solid rgba(217,146,42,.25);
+      color: var(--amber-lt);
+      font-family: var(--mono);
+      font-size: .7rem;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      padding: 6px 16px;
+      border-radius: 2px;
+      margin-bottom: 36px;
+      animation: fadeDown .8s ease both;
+    }
+    .hero-eyebrow::before {
+      content: '';
+      width: 6px; height: 6px;
+      background: var(--amber);
+      border-radius: 50%;
+      animation: pulse 2s ease infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity: 1; } 50% { opacity: .3; }
+    }
+
+    .hero h1 {
+      font-family: var(--serif);
+      font-weight: 300;
+      font-size: clamp(4rem, 12vw, 9rem);
+      line-height: .9;
+      letter-spacing: -.02em;
+      color: var(--cream);
+      margin-bottom: 8px;
+      animation: fadeUp .9s .1s ease both;
+    }
+    .hero h1 em {
+      font-style: italic;
+      color: var(--amber);
+    }
+    .hero-sub-title {
+      font-family: var(--mono);
+      font-size: .75rem;
+      letter-spacing: .25em;
+      color: var(--cream-dim);
+      text-transform: uppercase;
+      margin-bottom: 32px;
+      animation: fadeUp .9s .2s ease both;
+    }
+    .hero-desc {
+      max-width: 560px;
+      font-family: var(--serif);
+      font-size: 1.3rem;
+      line-height: 1.65;
+      color: var(--cream-dim);
+      font-weight: 300;
+      margin: 0 auto 52px;
+      animation: fadeUp .9s .3s ease both;
+    }
+    .hero-desc strong { color: var(--cream); font-weight: 400; }
+
+    .hero-actions {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+      animation: fadeUp .9s .4s ease both;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--amber);
+      color: var(--ink);
+      text-decoration: none;
+      font-family: var(--sans);
+      font-weight: 700;
+      font-size: .85rem;
+      letter-spacing: .06em;
+      padding: 14px 28px;
+      border-radius: 3px;
+      transition: background .2s, transform .15s;
+    }
+    .btn-primary:hover { background: var(--amber-lt); transform: translateY(-2px); }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: transparent;
+      color: var(--cream);
+      text-decoration: none;
+      font-family: var(--sans);
+      font-size: .85rem;
+      letter-spacing: .06em;
+      padding: 14px 28px;
+      border: 1px solid rgba(240,230,207,.2);
+      border-radius: 3px;
+      transition: border-color .2s, transform .15s;
+    }
+    .btn-secondary:hover { border-color: var(--amber); transform: translateY(-2px); }
+
+    /* Decorative circle */
+    .hero-circle {
+      position: absolute;
+      width: 600px; height: 600px;
+      border-radius: 50%;
+      border: 1px solid rgba(217,146,42,.06);
+      top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      pointer-events: none;
+      animation: rotateSlow 40s linear infinite;
+    }
+    .hero-circle::before {
+      content: '';
+      position: absolute;
+      width: 400px; height: 400px;
+      border-radius: 50%;
+      border: 1px solid rgba(217,146,42,.09);
+      top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+    }
+    @keyframes rotateSlow { to { transform: translate(-50%,-50%) rotate(360deg); } }
+
+    /* ── STAT BAR ─────────────────────────────────────────────── */
+    .stat-bar {
+      position: relative;
+      z-index: 1;
+      background: var(--ink-2);
+      border-top: 1px solid rgba(217,146,42,.1);
+      border-bottom: 1px solid rgba(217,146,42,.1);
+      display: flex;
+      justify-content: center;
+      gap: 0;
+    }
+    .stat-item {
+      flex: 1;
+      max-width: 220px;
+      padding: 32px 24px;
+      text-align: center;
+      border-right: 1px solid rgba(217,146,42,.08);
+    }
+    .stat-item:last-child { border-right: none; }
+    .stat-num {
+      font-family: var(--serif);
+      font-size: 2.4rem;
+      font-weight: 300;
+      color: var(--amber-lt);
+      line-height: 1;
+    }
+    .stat-label {
+      font-family: var(--mono);
+      font-size: .65rem;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      color: var(--cream-dim);
+      margin-top: 6px;
+    }
+
+    /* ── SECTION COMMON ───────────────────────────────────────── */
+    section {
+      position: relative;
+      z-index: 1;
+    }
+    .section-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 100px 48px;
+    }
+    .section-label {
+      font-family: var(--mono);
+      font-size: .65rem;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+      color: var(--amber);
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-family: var(--serif);
+      font-weight: 300;
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      line-height: 1.1;
+      margin-bottom: 20px;
+    }
+    .section-title em { font-style: italic; color: var(--amber); }
+    .section-body {
+      font-family: var(--serif);
+      font-size: 1.15rem;
+      line-height: 1.7;
+      color: var(--cream-dim);
+      max-width: 560px;
+    }
+
+    /* ── WHAT IT BUILDS ───────────────────────────────────────── */
+    .output-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1px;
+      background: rgba(217,146,42,.08);
+      margin-top: 60px;
+      border: 1px solid rgba(217,146,42,.08);
+    }
+    .output-card {
+      background: var(--ink-2);
+      padding: 32px 28px;
+      transition: background .2s;
+    }
+    .output-card:hover { background: var(--ink-3); }
+    .output-num {
+      font-family: var(--mono);
+      font-size: .7rem;
+      color: var(--amber);
+      letter-spacing: .1em;
+      margin-bottom: 12px;
+    }
+    .output-card h3 {
+      font-family: var(--sans);
+      font-weight: 700;
+      font-size: .95rem;
+      letter-spacing: .02em;
+      margin-bottom: 10px;
+    }
+    .output-card p {
+      font-family: var(--serif);
+      font-size: 1rem;
+      line-height: 1.55;
+      color: var(--cream-dim);
+    }
+
+    /* ── FEATURE BENTO ────────────────────────────────────────── */
+    .bento {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
+      gap: 12px;
+      margin-top: 60px;
+    }
+    .bento-card {
+      background: var(--ink-2);
+      border: 1px solid rgba(217,146,42,.1);
+      padding: 36px 32px;
+      border-radius: 4px;
+      transition: border-color .2s, transform .2s;
+    }
+    .bento-card:hover { border-color: rgba(217,146,42,.35); transform: translateY(-3px); }
+    .bento-card.wide { grid-column: span 2; }
+    .bento-icon {
+      width: 40px; height: 40px;
+      background: rgba(217,146,42,.12);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      font-size: 1.2rem;
+    }
+    .bento-card h3 {
+      font-family: var(--sans);
+      font-weight: 700;
+      font-size: 1rem;
+      margin-bottom: 10px;
+    }
+    .bento-card p {
+      font-family: var(--serif);
+      font-size: 1rem;
+      color: var(--cream-dim);
+      line-height: 1.6;
+    }
+
+    /* ── CODE BLOCK ───────────────────────────────────────────── */
+    .code-section {
+      background: var(--ink-2);
+      border-top: 1px solid rgba(217,146,42,.08);
+      border-bottom: 1px solid rgba(217,146,42,.08);
+    }
+    .code-layout {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 64px;
+      align-items: center;
+    }
+    .code-window {
+      background: #0D0906;
+      border: 1px solid rgba(217,146,42,.15);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .code-titlebar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: rgba(217,146,42,.06);
+      border-bottom: 1px solid rgba(217,146,42,.1);
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-r { background: #FF5F57; }
+    .dot-y { background: #FEBC2E; }
+    .dot-g { background: #28C840; }
+    .code-filename {
+      margin-left: 8px;
+      font-family: var(--mono);
+      font-size: .7rem;
+      color: var(--cream-dim);
+    }
+    .code-body {
+      padding: 24px;
+      font-family: var(--mono);
+      font-size: .75rem;
+      line-height: 1.8;
+      overflow-x: auto;
+    }
+    .code-body .kw  { color: #D9922A; }
+    .code-body .str { color: #3D7A5E; }
+    .code-body .cmt { color: #4A3B2E; }
+    .code-body .fn  { color: #F0B455; }
+    .code-body .typ { color: #B85C2E; }
+    .code-body .lit { color: #A89070; }
+
+    /* ── INSTALL SECTION ──────────────────────────────────────── */
+    .install-tabs {
+      display: flex;
+      gap: 0;
+      border: 1px solid rgba(217,146,42,.15);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 4px;
+      width: fit-content;
+    }
+    .tab-btn {
+      background: var(--ink-3);
+      color: var(--cream-dim);
+      border: none;
+      padding: 10px 24px;
+      font-family: var(--mono);
+      font-size: .75rem;
+      cursor: pointer;
+      transition: background .2s, color .2s;
+      letter-spacing: .08em;
+      border-right: 1px solid rgba(217,146,42,.15);
+    }
+    .tab-btn:last-child { border-right: none; }
+    .tab-btn.active { background: var(--amber); color: var(--ink); font-weight: 700; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .install-step {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      padding: 20px 0;
+      border-bottom: 1px solid rgba(217,146,42,.08);
+    }
+    .install-step:last-child { border-bottom: none; }
+    .step-num {
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: rgba(217,146,42,.15);
+      border: 1px solid rgba(217,146,42,.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-size: .7rem;
+      color: var(--amber);
+    }
+    .step-content { flex: 1; }
+    .step-content p {
+      font-family: var(--serif);
+      font-size: 1rem;
+      color: var(--cream-dim);
+      margin-bottom: 8px;
+    }
+    .step-content strong { color: var(--cream); }
+    .inline-code {
+      display: block;
+      background: var(--ink-3);
+      border: 1px solid rgba(217,146,42,.12);
+      border-left: 3px solid var(--amber);
+      padding: 10px 14px;
+      font-family: var(--mono);
+      font-size: .75rem;
+      color: var(--amber-lt);
+      border-radius: 0 3px 3px 0;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    /* ── MARKET CALLOUT ───────────────────────────────────────── */
+    .market-callout {
+      background: linear-gradient(135deg, rgba(61,122,94,.15), rgba(217,146,42,.08));
+      border: 1px solid rgba(61,122,94,.25);
+      border-radius: 6px;
+      padding: 40px 48px;
+      margin-top: 60px;
+    }
+    .market-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 24px;
+      margin-top: 28px;
+    }
+    .market-item { text-align: center; }
+    .market-icon { font-size: 1.5rem; margin-bottom: 8px; }
+    .market-item h4 {
+      font-family: var(--sans);
+      font-size: .85rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .market-item p {
+      font-family: var(--serif);
+      font-size: .9rem;
+      color: var(--cream-dim);
+    }
+
+    /* ── KENTE DIVIDER ────────────────────────────────────────── */
+    .kente-divider {
+      height: 6px;
+      background: repeating-linear-gradient(
+        90deg,
+        var(--amber) 0px, var(--amber) 12px,
+        var(--terra) 12px, var(--terra) 24px,
+        var(--green) 24px, var(--green) 36px,
+        var(--ink-3) 36px, var(--ink-3) 48px
+      );
+      opacity: .6;
+    }
+
+    /* ── FOOTER ───────────────────────────────────────────────── */
+    footer {
+      position: relative;
+      z-index: 1;
+      background: var(--ink-2);
+      border-top: 1px solid rgba(217,146,42,.1);
+      padding: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: gap;
+    }
+    .footer-logo {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: 1rem;
+      color: var(--amber);
+      letter-spacing: .08em;
+    }
+    .footer-meta {
+      font-family: var(--mono);
+      font-size: .7rem;
+      color: var(--cream-dim);
+      letter-spacing: .08em;
+      text-align: right;
+    }
+    .footer-meta a { color: var(--amber-lt); text-decoration: none; }
+
+    /* ── ANIMATIONS ───────────────────────────────────────────── */
+    @keyframes fadeUp   { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:none; } }
+    @keyframes fadeDown { from { opacity:0; transform:translateY(-12px); } to { opacity:1; transform:none; } }
+
+    /* ── RESPONSIVE ───────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      nav { padding: 16px 20px; }
+      nav ul { display: none; }
+      .hero { padding: 100px 24px 60px; }
+      .section-inner { padding: 64px 24px; }
+      .code-layout { grid-template-columns: 1fr; gap: 32px; }
+      .bento { grid-template-columns: 1fr; }
+      .bento-card.wide { grid-column: span 1; }
+      .market-grid { grid-template-columns: repeat(2,1fr); }
+      .stat-bar { flex-wrap: wrap; }
+      .stat-item { min-width: 50%; border-right: none; border-bottom: 1px solid rgba(217,146,42,.08); }
+      footer { flex-direction: column; gap: 16px; text-align: center; }
+      .footer-meta { text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <a class="nav-logo" href="#">KAJOLA<span>.skill</span></a>
+    <ul>
+      <li><a href="#outputs">Outputs</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#install" class="nav-cta">↓ Download</a></li>
+    </ul>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-circle"></div>
+    <div class="hero-eyebrow">Claude Skill · Production Platform Architect</div>
+    <h1><em>Kajola</em></h1>
+    <p class="hero-sub-title">The Architect Skill for Multi-Tenant Platforms</p>
+    <p class="hero-desc">
+      One prompt. <strong>Full system architecture.</strong> PRD, SQL schema, API design,
+      monorepo structure, deployment plan, automation engine, and roadmap —
+      generated at senior CTO depth, Africa-first by default.
+    </p>
+    <div class="hero-actions">
+      <a href="kajola-skill.zip" class="btn-primary" download>
+        ↓ Download .skill file
+      </a>
+      <a href="https://github.com/femi-adeyemo/kajola-skill" class="btn-secondary">
+        ★ View on GitHub
+      </a>
+    </div>
+  </section>
+
+  <!-- STAT BAR -->
+  <div class="stat-bar">
+    <div class="stat-item">
+      <div class="stat-num">11</div>
+      <div class="stat-label">Output Sections</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">10+</div>
+      <div class="stat-label">Tables Generated</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">3</div>
+      <div class="stat-label">Payment Providers</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">100%</div>
+      <div class="stat-label">RLS Enforced</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">0</div>
+      <div class="stat-label">Placeholders Left</div>
+    </div>
+  </div>
+
+  <!-- WHAT IT BUILDS -->
+  <section id="outputs">
+    <div class="section-inner">
+      <p class="section-label">// What Kajola Generates</p>
+      <h2 class="section-title">Every deliverable<br><em>your team needs</em></h2>
+      <p class="section-body">
+        Kajola doesn't produce summaries or outlines. It produces the real thing — 
+        production SQL with RLS, typed API specs, and deployment steps your 
+        engineering team can execute immediately.
+      </p>
+
+      <div class="output-grid">
+        <div class="output-card">
+          <div class="output-num">01</div>
+          <h3>Product Requirements Document</h3>
+          <p>Vision, personas, P0/P1/P2 prioritization, KPIs, and explicit out-of-scope decisions.</p>
+        </div>
+        <div class="output-card">
+          <div class="output-num">02</div>
+          <h3>System Architecture Diagram</h3>
+          <p>ASCII diagram of all layers: client apps, edge functions, DB, queue, storage, external integrations.</p>
+        </div>
+        <div class="output-card">
+          <div class="output-num">03</div>
+          <h3>Full SQL Schema</h3>
+          <p>Every table with enums, constraints, indexes, foreign keys, RLS policies, and trigger functions.</p>
+        </div>
+        <div class="output-card">
+          <div class="output-num">04</div>
+          <h3>API Endpoint Definitions</h3>
+          <p>Method, path, auth requirement, request/response shape, and error cases per endpoint.</p>
+        </div>
+        <div class="output-card">
+          <div class="output-num">05</div>
+          <h3>Frontend Component Structure</h3>
+          <p>Full directory tree for Next.js dashboard and Expo mobile app with component descriptions.</p>
+        </div>
+        <div class="output-card">
+          <div class="output-num">06</div>
+          <h3>Monorepo Folder Layout</h3>
+          <p>Turborepo structure: apps, packages, supabase functions, shared UI and API layers.</p>
+        </div>
+        <div class="output-card">
+          <div class="output-num">07</div>
+          <h3>Automation Engine Design</h3>
+          <p>Event table, rule schema, idempotency pattern, retry logic, and cron-based failure recovery.</p>
+        </div>
+        <div class="output-card">
+          <div class="output-num">08</div>
+          <h3>Deployment Plan</h3>
+          <p>Step-by-step Supabase setup, all environment variables, and CI/CD pipeline specification.</p>
+        </div>
+        <div class="output-card">
+          <div class="output-num">09</div>
+          <h3>Monetization Strategy</h3>
+          <p>Transaction fees, subscription tiers, featured listings — with specific rates, not generic models.</p>
+        </div>
+        <div class="output-card">
+          <div class="output-num">10</div>
+          <h3>Scaling Strategy</h3>
+          <p>Concrete triggers: what changes at 10k, 100k, and 1M users.</p>
+        </div>
+        <div class="output-card">
+          <div class="output-num">11</div>
+          <h3>Product Roadmap</h3>
+          <p>Quarterly feature plan with business impact framing, not just a feature list.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="kente-divider"></div>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <div class="section-inner">
+      <p class="section-label">// Why Kajola</p>
+      <h2 class="section-title">Built for the<br><em>real world</em></h2>
+
+      <div class="bento">
+        <div class="bento-card wide">
+          <div class="bento-icon">🔒</div>
+          <h3>Tenant Isolation by Default</h3>
+          <p>Every table gets <code style="color:var(--amber);font-family:var(--mono);font-size:.85em">tenant_id</code>. Every query is wrapped in an RLS policy using the <code style="color:var(--amber);font-family:var(--mono);font-size:.85em">current_user_tenant_id()</code> helper function. Super admin bypass is included. Cross-tenant data leaks are architecturally impossible.</p>
+        </div>
+        <div class="bento-card">
+          <div class="bento-icon">🌍</div>
+          <h3>Africa-First Patterns</h3>
+          <p>SMS over email. Paystack + Flutterwave + M-Pesa payment abstraction layer. Offline action queue. Low-bandwidth mode. Android-first mobile UI guidance baked in.</p>
+        </div>
+        <div class="bento-card">
+          <div class="bento-icon">⚡</div>
+          <h3>Event-Driven Automation</h3>
+          <p>Full automation engine: system_events table, rule engine, idempotent execution, retry logic with exponential backoff. Booking → SMS → Review — all wired.</p>
+        </div>
+        <div class="bento-card">
+          <div class="bento-icon">🔄</div>
+          <h3>No Placeholders Allowed</h3>
+          <p>The skill enforces a zero-placeholder quality standard. Every SQL index is named. Every API endpoint has error cases. Every env var is listed with its purpose.</p>
+        </div>
+        <div class="bento-card">
+          <div class="bento-icon">📐</div>
+          <h3>Domain-Adaptive</h3>
+          <p>Works for booking platforms, equipment rentals, fintech, edtech, and more. The architecture patterns flex to the domain — the quality standard never does.</p>
+        </div>
+      </div>
+
+      <!-- Market callout -->
+      <div class="market-callout">
+        <p class="section-label">// African Market Defaults</p>
+        <h3 style="font-family:var(--sans);font-weight:700;font-size:1.1rem;">Included without asking</h3>
+        <div class="market-grid">
+          <div class="market-item">
+            <div class="market-icon">📱</div>
+            <h4>Android First</h4>
+            <p>Mobile layout, touch targets, data-light by default</p>
+          </div>
+          <div class="market-item">
+            <div class="market-icon">💸</div>
+            <h4>Multi-Provider Payments</h4>
+            <p>Paystack, Flutterwave, M-Pesa, Cash tracking</p>
+          </div>
+          <div class="market-item">
+            <div class="market-icon">📡</div>
+            <h4>SMS-Primary Notifications</h4>
+            <p>No reliance on email — Termii / Twilio wired</p>
+          </div>
+          <div class="market-item">
+            <div class="market-icon">🔌</div>
+            <h4>Offline Queue</h4>
+            <p>Actions queued locally, synced on reconnect</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CODE PREVIEW -->
+  <section class="code-section">
+    <div class="section-inner">
+      <div class="code-layout">
+        <div>
+          <p class="section-label">// Example Output</p>
+          <h2 class="section-title">Real SQL,<br><em>not pseudocode</em></h2>
+          <p class="section-body">
+            Kajola generates the actual CREATE TABLE statements, RLS policies, 
+            conflict-prevention triggers, and index definitions your database needs — 
+            not annotated skeletons for you to complete.
+          </p>
+        </div>
+        <div class="code-window">
+          <div class="code-titlebar">
+            <span class="dot dot-r"></span>
+            <span class="dot dot-y"></span>
+            <span class="dot dot-g"></span>
+            <span class="code-filename">0001_initial.sql</span>
+          </div>
+          <div class="code-body">
+<span class="cmt">-- Booking conflict prevention trigger</span>
+<span class="kw">CREATE OR REPLACE FUNCTION</span> <span class="fn">prevent_booking_overlap</span>()
+<span class="kw">RETURNS TRIGGER AS</span> <span class="str">$$</span>
+<span class="kw">BEGIN</span>
+  <span class="kw">IF EXISTS</span> (
+    <span class="kw">SELECT</span> <span class="lit">1</span> <span class="kw">FROM</span> bookings
+    <span class="kw">WHERE</span> artisan_id = NEW.artisan_id
+      <span class="kw">AND</span> status <span class="kw">NOT IN</span> (<span class="str">'cancelled'</span>,<span class="str">'no_show'</span>)
+      <span class="kw">AND</span> scheduled_start &lt; NEW.scheduled_end
+      <span class="kw">AND</span> scheduled_end &gt; NEW.scheduled_start
+  ) <span class="kw">THEN</span>
+    <span class="kw">RAISE EXCEPTION</span> <span class="str">'Booking conflict detected'</span>;
+  <span class="kw">END IF</span>;
+  <span class="kw">RETURN</span> NEW;
+<span class="kw">END</span>;
+<span class="str">$$</span> <span class="kw">LANGUAGE</span> plpgsql;
+
+<span class="cmt">-- RLS: tenant isolation</span>
+<span class="kw">CREATE POLICY</span> <span class="str">"tenant_isolation"</span>
+  <span class="kw">ON</span> bookings <span class="kw">FOR ALL</span>
+  <span class="kw">USING</span> (tenant_id = <span class="fn">current_user_tenant_id</span>());
+
+<span class="kw">CREATE POLICY</span> <span class="str">"super_admin_bypass"</span>
+  <span class="kw">ON</span> bookings <span class="kw">FOR ALL</span>
+  <span class="kw">USING</span> (<span class="fn">has_role</span>(<span class="str">'super_admin'</span>));
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="kente-divider"></div>
+
+  <!-- INSTALL -->
+  <section id="install">
+    <div class="section-inner">
+      <p class="section-label">// Installation</p>
+      <h2 class="section-title">Two ways<br><em>to install</em></h2>
+
+      <div style="margin-top:48px;">
+        <div class="install-tabs">
+          <button class="tab-btn active" onclick="switchTab('claude-code')">Claude Code</button>
+          <button class="tab-btn" onclick="switchTab('github')">GitHub</button>
+          <button class="tab-btn" onclick="switchTab('manual')">Manual .skill</button>
+        </div>
+
+        <!-- Claude Code -->
+        <div id="tab-claude-code" class="tab-panel active" style="margin-top:24px;">
+          <div class="install-step">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <p><strong>Open your Claude Code project directory</strong></p>
+              <code class="inline-code">cd your-project</code>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <p><strong>Create the skills directory (if it doesn't exist)</strong></p>
+              <code class="inline-code">mkdir -p .claude/skills</code>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <p><strong>Unzip the downloaded skill into the skills folder</strong></p>
+              <code class="inline-code">unzip kajola-skill.zip -d .claude/skills/</code>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">4</div>
+            <div class="step-content">
+              <p><strong>Verify installation — Claude Code will detect it automatically</strong></p>
+              <code class="inline-code">ls .claude/skills/production-platform-architect/</code>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">5</div>
+            <div class="step-content">
+              <p><strong>Use it — describe your platform and Claude does the rest</strong></p>
+              <code class="inline-code">"Design the full system architecture for [your product]"</code>
+            </div>
+          </div>
+        </div>
+
+        <!-- GitHub -->
+        <div id="tab-github" class="tab-panel" style="margin-top:24px;">
+          <div class="install-step">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <p><strong>Clone the skill repository</strong></p>
+              <code class="inline-code">git clone https://github.com/femi-adeyemo/kajola-skill.git</code>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <p><strong>Copy the skill to your project's skills folder</strong></p>
+              <code class="inline-code">cp -r kajola-skill/production-platform-architect .claude/skills/</code>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <p><strong>Or add as a git submodule for easy updates</strong></p>
+              <code class="inline-code">git submodule add https://github.com/femi-adeyemo/kajola-skill.git .claude/skills/kajola</code>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">4</div>
+            <div class="step-content">
+              <p><strong>Stay up to date</strong></p>
+              <code class="inline-code">git submodule update --remote</code>
+            </div>
+          </div>
+        </div>
+
+        <!-- Manual -->
+        <div id="tab-manual" class="tab-panel" style="margin-top:24px;">
+          <div class="install-step">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <p><strong>Download the <code style="color:var(--amber);font-family:var(--mono)">.skill</code> file below</strong></p>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <p><strong>Open Claude Code and go to Settings → Skills</strong></p>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <p><strong>Click "Install from file" and select the downloaded <code style="color:var(--amber);font-family:var(--mono)">.skill</code> file</strong></p>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">4</div>
+            <div class="step-content">
+              <p><strong>Done — the skill is available in your session immediately</strong></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Download CTA -->
+      <div style="margin-top:48px;display:flex;gap:16px;flex-wrap:wrap;">
+        <a href="kajola-skill.zip" class="btn-primary" download>↓ Download kajola-skill.zip</a>
+        <a href="production-platform-architect.skill" class="btn-secondary" download>↓ Download .skill file</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-logo">KAJOLA</div>
+    <div class="footer-meta">
+      Built with Claude · By <a href="#">EduRadius LLC / Femi Adeyemo</a><br>
+      MIT License · production-platform-architect v1.0
+    </div>
+  </footer>
+
+  <script>
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('tab-' + tab).classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    // Scroll fade-in
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          e.target.style.opacity = '1';
+          e.target.style.transform = 'none';
+        }
+      });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.output-card, .bento-card, .install-step').forEach(el => {
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(20px)';
+      el.style.transition = 'opacity .5s ease, transform .5s ease';
+      observer.observe(el);
+    });
+  </script>
+</body>
+</html>

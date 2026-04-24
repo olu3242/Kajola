@@ -1,0 +1,20 @@
+{
+  "skill_name": "production-platform-architect",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I want to build a multi-tenant artisan booking platform for African markets called CraftFlow Africa. It needs to support barbers, tailors, nail techs, mechanics, etc. Clients should be able to discover artisans, book services, and pay via Paystack, Flutterwave, or M-Pesa. The system needs multi-tenant support for individual artisans, salons with staff, and cooperatives. Give me the full system architecture.",
+      "expected_output": "Full architecture package: PRD, SQL schema with RLS, API endpoints, monorepo folder structure, deployment plan, automation engine, monetization strategy, and roadmap. SQL must include all tables with tenant_id, enums, indexes, and working RLS policies."
+    },
+    {
+      "id": 2,
+      "prompt": "Design the complete database schema for a multi-tenant service marketplace. Users can be clients or providers. Providers offer services with time slots. Clients book and pay. Reviews only after completed bookings. Everything needs RLS with tenant isolation.",
+      "expected_output": "Full SQL schema with CREATE TYPE enums, helper functions (current_user_tenant_id, has_role), all core tables with constraints and indexes, RLS policies for each table, and trigger functions for updated_at and audit logging."
+    },
+    {
+      "id": 3,
+      "prompt": "I'm building ToolHire Pro — a platform where contractors and construction companies can list and rent equipment. Multi-tenant (individual owners, rental companies, cooperatives). Mobile-first for East Africa where M-Pesa is king. Need the whole system design package.",
+      "expected_output": "Complete package adapted to equipment rental domain: PRD with equipment-specific user roles, system architecture, schema tailored to equipment/rental rather than booking/services, M-Pesa-first payment integration, and all 11 sections present."
+    }
+  ]
+}

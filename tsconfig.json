@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["dom", "dom.iterable", "es2020"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "preserve",
+    "baseUrl": ".",
+    "paths": {
+      "@kajola/ui": ["packages/ui/src"],
+      "@kajola/api": ["packages/api/src"],
+      "@kajola/db": ["packages/db/src"],
+      "@kajola/automation": ["packages/automation/src"]
+    }
+  },
+  "include": ["packages/**/*", "apps/**/*"],
+  "references": [
+    { "path": "packages/ui" },
+    { "path": "packages/api" },
+    { "path": "packages/db" },
+    { "path": "packages/automation" }
+  ]
+}

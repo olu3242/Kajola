@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "Kajola",
+    "slug": "kajola",
+    "version": "0.1.0",
+    "sdkVersion": "54.0.0",
+    "platforms": ["ios", "android", "web"],
+    "extra": {
+      "eas": {
+        "projectId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  }
+}

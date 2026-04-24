@@ -1,0 +1,26 @@
+{
+  "name": "@kajola/mobile",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "expo start",
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "expo": "~54.0.0",
+    "expo-router": "^5.0.0",
+    "react": "18.3.1",
+    "react-native": "0.72.7",
+    "expo-secure-store": "~14.0.0",
+    "@kajola/ui": "workspace:*",
+    "@kajola/api": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/react": "^18.3.3",
+    "@types/react-native": "^0.72.9"
+  }
+}
