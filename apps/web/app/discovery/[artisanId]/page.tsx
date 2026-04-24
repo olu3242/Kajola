@@ -9,8 +9,15 @@ async function fetchArtisan(artisanId: string) {
   return result.artisan;
 }
 
+async function fetchReviews(artisanId: string) {
+  const response = await fetch(`/api/artisans/${artisanId}/reviews`, { cache: 'no-store' });
+  if (!response.ok) return [];
+  const result = await response.json();
+  return result.reviews ?? [];
+}
+
 export default async function ArtisanDetailPage({ params }: { params: { artisanId: string } }) {
-  const artisan = await fetchArtisan(params.artisanId);
+  const [artisan, reviews] = await Promise.all([fetchArtisan(params.artisanId), fetchReviews(params.artisanId)]);
   if (!artisan) {
     notFound();
   }
@@ -19,6 +26,10 @@ export default async function ArtisanDetailPage({ params }: { params: { artisanI
     <main style={{ padding: 32, fontFamily: 'system-ui, sans-serif', maxWidth: 800, margin: '0 auto' }}>
       <h1>{artisan.business_name}</h1>
       <p style={{ marginTop: 12, color: '#4B5563' }}>{artisan.headline || artisan.category}</p>
+      <p style={{ marginTop: 12 }}>
+        ⭐ {Number(artisan.stats?.avg_rating ?? 0).toFixed(1)} ({artisan.stats?.total_reviews ?? 0} reviews) · {artisan.stats?.completed_jobs ?? 0} jobs completed
+      </p>
+      {artisan.badges?.length ? <p style={{ color: '#166534', fontWeight: 700 }}>{artisan.badges.join(' · ')}</p> : null}
       <div style={{ marginTop: 24 }}>
         <p><strong>Location:</strong> {artisan.city}, {artisan.state}</p>
         <p><strong>Verified:</strong> {artisan.verified ? 'Yes' : 'No'}</p>
@@ -33,6 +44,18 @@ export default async function ArtisanDetailPage({ params }: { params: { artisanI
           View services
         </a>
       </div>
+      <section style={{ marginTop: 36 }}>
+        <h2>Reviews</h2>
+        {reviews.length === 0 ? <p>No reviews yet.</p> : reviews.map((review: any) => (
+          <article key={review.id} style={{ padding: 16, border: '1px solid #E5E7EB', borderRadius: 8, marginBottom: 12 }}>
+            <p style={{ margin: 0 }}>⭐ {review.rating}/5</p>
+            {review.comment ? <p>{review.comment}</p> : null}
+            {review.review_tags?.length ? (
+              <p>{review.review_tags.map((tag: any) => <span key={tag.tag} style={{ marginRight: 8, color: '#374151' }}>#{tag.tag}</span>)}</p>
+            ) : null}
+          </article>
+        ))}
+      </section>
     </main>
   );
 }

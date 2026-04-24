@@ -12,8 +12,11 @@ type Payment = {
   currency: string;
   created_at: string;
   provider: string;
-  provider_reference: string;
+  provider_reference?: string;
+  reference?: string;
 };
+
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
 
 export default function PaymentsScreen() {
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -28,7 +31,7 @@ export default function PaymentsScreen() {
         setLoading(false);
         return;
       }
-      const res = await fetch('/api/payments/history', { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/payments/history`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? 'Unable to load payments');
@@ -52,7 +55,7 @@ export default function PaymentsScreen() {
           <Text style={{ fontSize: 18, fontWeight: '600' }}>{payment.provider}</Text>
           <Text>Amount: {payment.currency} {payment.amount_cents / 100}</Text>
           <Text>Status: {payment.status}</Text>
-          <Text>Reference: {payment.provider_reference}</Text>
+          <Text>Reference: {payment.reference ?? payment.provider_reference}</Text>
           <Text>{new Date(payment.created_at).toLocaleString()}</Text>
         </View>
       ))}

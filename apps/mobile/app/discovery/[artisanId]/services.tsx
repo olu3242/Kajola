@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, SafeAreaView, Text, View } from 'react-native';
-import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 type Service = {
   id: string;
@@ -13,14 +13,14 @@ type Service = {
 export default function ServiceListScreen() {
   const params = useLocalSearchParams();
   const artisanId = params.artisanId as string;
-  const navigation = useNavigation();
+  const router = useRouter();
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const response = await fetch(`/api/services?artisan_id=${artisanId}`);
+        const response = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL ?? ''}/api/services?artisan_id=${artisanId}`);
         const data = await response.json();
         setServices(data.services ?? []);
       } catch (error) {
@@ -49,9 +49,12 @@ export default function ServiceListScreen() {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <Pressable
-              onPress={() => navigation.push('discovery/[artisanId]/services/[serviceId]/slots', {
+              onPress={() => router.push({
+                pathname: '/discovery/[artisanId]/services/[serviceId]/slots',
+                params: {
                 artisanId,
                 serviceId: item.id
+                }
               })}
               style={{ marginBottom: 16, padding: 20, borderRadius: 16, backgroundColor: '#F8FAFC' }}
             >

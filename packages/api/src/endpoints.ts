@@ -13,6 +13,14 @@ export const ApiRoutes = {
   artisans: {
     list: '/api/artisans',
     detail: (artisanId: string) => `/api/artisans/${artisanId}`,
+    reviews: (artisanId: string) => `/api/artisans/${artisanId}/reviews`,
+  },
+  activity: {
+    create: '/api/activity',
+  },
+  discovery: {
+    recommended: '/api/discovery/recommended',
+    popular: '/api/discovery/popular',
   },
   services: {
     listByArtisan: (artisanId: string) => `/api/artisans/${artisanId}/services`,
@@ -33,15 +41,14 @@ export const ApiRoutes = {
     updateStatus: (bookingId: string) => `/api/bookings/${bookingId}/status`,
   },
   payments: {
-    initiate: '/api/payments/initiate',
+    initiate: '/api/payments',
+    verify: '/api/payments/verify',
+    retry: '/api/payments/retry',
     webhook: '/api/payments/webhook',
     history: '/api/payments/history',
   },
   search: {
     artisans: '/api/search/artisans',
-  },
-  artisans: {
-    list: '/api/artisans',
   },
   reviews: {
     list: '/api/reviews',
@@ -55,6 +62,12 @@ export const ApiRoutes = {
     triggerEvent: '/api/events/trigger',
     runs: '/api/automation/runs',
     retryRun: (runId: string) => `/api/automation/runs/${runId}/retry`,
+  },
+  admin: {
+    dashboard: '/api/admin/dashboard',
+    events: '/api/admin/events',
+    retryEvent: '/api/admin/events/retry',
+    automationRules: '/api/admin/automation-rules',
   },
 };
 
@@ -83,6 +96,8 @@ export type TenantPayload = {
   currency?: string;
 };
 
-export type BookingStatus = 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
+export type BookingStatus = 'pending' | 'awaiting_payment' | 'paid' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
+export type PaymentMode = 'instant' | 'escrow';
+export type ActivityEvent = 'view' | 'click' | 'book' | 'repeat';
 
-export type PaymentStatus = 'pending' | 'partial' | 'paid' | 'failed' | 'refunded';
+export type PaymentStatus = 'pending' | 'initialized' | 'successful' | 'failed';

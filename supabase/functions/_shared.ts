@@ -13,6 +13,15 @@ export function errorResponse(message: string, status = 400) {
   return json({ error: message }, status);
 }
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
+
 export function getEnv(name: string) {
   const value = Deno.env.get(name);
   if (!value) {
@@ -30,7 +39,7 @@ function getJwtKey() {
 export async function authenticateRequest(req: Request) {
   const authHeader = req.headers.get('authorization') ?? req.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    throw new Error('Authorization header missing');
+    throw new ApiError('Unauthorized', 401);
   }
 
   const token = authHeader.replace(/^Bearer\s+/i, '');
@@ -41,8 +50,16 @@ export async function authenticateRequest(req: Request) {
     }
     return payload;
   } catch (error) {
-    throw new Error('Invalid access token');
+    throw new ApiError('Unauthorized', 401);
   }
+}
+
+export function handleError(err: unknown) {
+  console.error(err);
+  if (err instanceof ApiError) {
+    return errorResponse(err.message, err.status);
+  }
+  return errorResponse('Internal server error', 500);
 }
 
 export function createSupabaseClient(): SupabaseClient {

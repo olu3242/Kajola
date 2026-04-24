@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import GoogleSignInButton from '../GoogleSignInButton';
 
 export default function SignupPage() {
   const [phone, setPhone] = useState('');
@@ -116,6 +117,7 @@ export default function SignupPage() {
       </form>
       {otpSent ? <p style={{ marginTop: 12, color: '#047857' }}>OTP request submitted.</p> : null}
       {message ? <p style={{ marginTop: 16 }}>{message}</p> : null}
+      <GoogleSignInButton label="Continue with Google" />
     </main>
   );
 }

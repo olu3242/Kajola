@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import GoogleSignInButton from './GoogleSignInButton';
 
 export default function AuthPage() {
   return (
@@ -15,6 +16,7 @@ export default function AuthPage() {
           Sign up
         </Link>
       </div>
+      <GoogleSignInButton />
     </main>
   );
 }

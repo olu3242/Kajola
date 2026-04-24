@@ -9,7 +9,8 @@ type Payment = {
   currency: string;
   created_at: string;
   provider: string;
-  provider_reference: string;
+  provider_reference?: string;
+  reference?: string;
 };
 
 export default function PaymentsPage() {
@@ -53,7 +54,7 @@ export default function PaymentsPage() {
               <p style={{ margin: 0, fontWeight: 700 }}>{payment.provider}</p>
               <p style={{ margin: '8px 0' }}>Amount: {payment.currency} {payment.amount_cents / 100}</p>
               <p style={{ margin: '8px 0' }}>Status: {payment.status}</p>
-              <p style={{ margin: '8px 0' }}>Reference: {payment.provider_reference}</p>
+              <p style={{ margin: '8px 0' }}>Reference: {payment.reference ?? payment.provider_reference}</p>
               <p style={{ margin: '8px 0', color: '#6b7280' }}>{new Date(payment.created_at).toLocaleString()}</p>
             </div>
           ))}

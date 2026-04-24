@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "migrations:validate": "pwsh ./scripts/migrations/validate.ps1",
+    "migrations:drift": "pwsh ./scripts/migrations/check-drift.ps1",
+    "migrations:deploy": "pwsh ./scripts/migrations/deploy.ps1"
   },
   "devDependencies": {
     "turbo": "^1.10.2",

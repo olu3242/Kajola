@@ -12,15 +12,23 @@ export async function forwardToFunction(path: string, req: NextRequest) {
   if (auth) {
     headers.set('authorization', auth);
   }
+  const paystackSignature = req.headers.get('x-paystack-signature');
+  const stripeSignature = req.headers.get('stripe-signature');
+  if (paystackSignature) headers.set('x-paystack-signature', paystackSignature);
+  if (stripeSignature) headers.set('stripe-signature', stripeSignature);
 
-  const response = await fetch(`${FUNCTIONS_URL}/${path}`, {
+  try {
+    const response = await fetch(`${FUNCTIONS_URL}/${path}`, {
     method: req.method,
     headers,
     body: req.method === 'GET' ? undefined : await req.text()
   });
 
-  const data = await response.json();
-  return NextResponse.json(data, { status: response.status });
+    const data = await response.json().catch(() => ({ error: 'Invalid upstream response' }));
+    return NextResponse.json(data, { status: response.status });
+  } catch (error) {
+    return NextResponse.json({ error: 'Payment service unavailable' }, { status: 500 });
+  }
 }
 
 export async function forwardToFunctionWithQuery(path: string, req: NextRequest) {
@@ -36,11 +44,15 @@ export async function forwardToFunctionWithQuery(path: string, req: NextRequest)
     headers.set('authorization', auth);
   }
 
-  const response = await fetch(`${FUNCTIONS_URL}/${path}${query ? `?${query}` : ''}`, {
+  try {
+    const response = await fetch(`${FUNCTIONS_URL}/${path}${query ? `?${query}` : ''}`, {
     method: req.method,
     headers
   });
 
-  const data = await response.json();
-  return NextResponse.json(data, { status: response.status });
+    const data = await response.json().catch(() => ({ error: 'Invalid upstream response' }));
+    return NextResponse.json(data, { status: response.status });
+  } catch (error) {
+    return NextResponse.json({ error: 'Payment service unavailable' }, { status: 500 });
+  }
 }

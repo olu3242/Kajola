@@ -13,6 +13,8 @@ type Booking = {
   artisan?: { business_name: string };
 };
 
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+
 export default function BookingsScreen() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,7 +28,7 @@ export default function BookingsScreen() {
         setLoading(false);
         return;
       }
-      const res = await fetch('/api/bookings', { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/bookings`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? 'Unable to load bookings');

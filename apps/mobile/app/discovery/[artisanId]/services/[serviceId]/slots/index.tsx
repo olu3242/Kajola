@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, SafeAreaView, Text, View } from 'react-native';
-import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 type BookingSlot = {
   id: string;
@@ -12,14 +12,14 @@ export default function SlotSelectionScreen() {
   const params = useLocalSearchParams();
   const artisanId = params.artisanId as string;
   const serviceId = params.serviceId as string;
-  const navigation = useNavigation();
+  const router = useRouter();
   const [slots, setSlots] = useState<BookingSlot[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const response = await fetch(`/api/booking-slots?artisan_id=${artisanId}&service_id=${serviceId}&status=available`);
+        const response = await fetch(`${process.env.EXPO_PUBLIC_API_BASE_URL ?? ''}/api/booking-slots?artisan_id=${artisanId}&service_id=${serviceId}&status=available`);
         const data = await response.json();
         setSlots(data.booking_slots ?? []);
       } catch (error) {
@@ -48,10 +48,13 @@ export default function SlotSelectionScreen() {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <Pressable
-              onPress={() => navigation.push('discovery/[artisanId]/services/[serviceId]/slots/[slotId]', {
+              onPress={() => router.push({
+                pathname: '/discovery/[artisanId]/services/[serviceId]/slots/[slotId]',
+                params: {
                 artisanId,
                 serviceId,
                 slotId: item.id
+                }
               })}
               style={{ marginBottom: 16, padding: 20, borderRadius: 16, backgroundColor: '#F8FAFC' }}
             >

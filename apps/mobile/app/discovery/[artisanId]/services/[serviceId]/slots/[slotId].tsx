@@ -17,6 +17,8 @@ type Service = {
   currency: string;
 };
 
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+
 export default function ConfirmSlotScreen() {
   const params = useLocalSearchParams();
   const artisanId = params.artisanId as string;
@@ -27,13 +29,14 @@ export default function ConfirmSlotScreen() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
+  const [paymentMode, setPaymentMode] = useState<'instant' | 'escrow'>('instant');
 
   useEffect(() => {
     async function load() {
       try {
         const [slotResponse, serviceResponse, token] = await Promise.all([
-          fetch(`/api/booking-slots?slot_id=${slotId}`),
-          fetch(`/api/services?service_id=${serviceId}`),
+          fetch(`${API_BASE}/api/booking-slots?slot_id=${slotId}`),
+          fetch(`${API_BASE}/api/services?service_id=${serviceId}`),
           SecureStore.getItemAsync('kajola_access_token')
         ]);
         const slotData = await slotResponse.json();
@@ -58,7 +61,7 @@ export default function ConfirmSlotScreen() {
 
     setMessage('');
     try {
-      const bookingResponse = await fetch('/api/bookings', {
+      const bookingResponse = await fetch(`${API_BASE}/api/bookings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -67,7 +70,8 @@ export default function ConfirmSlotScreen() {
         body: JSON.stringify({
           slot_id: slotId,
           service_id: serviceId,
-          artisan_id: artisanId
+          artisan_id: artisanId,
+          payment_mode: paymentMode
         })
       });
       const bookingData = await bookingResponse.json();
@@ -76,7 +80,7 @@ export default function ConfirmSlotScreen() {
         return;
       }
 
-      const paymentResponse = await fetch('/api/payments', {
+      const paymentResponse = await fetch(`${API_BASE}/api/payments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -132,6 +136,17 @@ export default function ConfirmSlotScreen() {
           <Text>NGN {service.price_cents / 100}</Text>
           <Text style={{ marginTop: 12 }}>Slot: {new Date(slot.start_at).toLocaleString()} - {new Date(slot.end_at).toLocaleString()}</Text>
           <Text>Status: {slot.status}</Text>
+        </View>
+        <View style={{ marginBottom: 20 }}>
+          <Text style={{ fontWeight: '700', marginBottom: 8 }}>Payment option</Text>
+          <View style={{ marginBottom: 10 }}>
+            <Button title="Pay Artisan Directly (Fastest)" onPress={() => setPaymentMode('instant')} color={paymentMode === 'instant' ? '#D9922A' : '#6B7280'} />
+            <Text style={{ marginTop: 6 }}>Pay directly to artisan for faster service.</Text>
+          </View>
+          <View>
+            <Button title="Use Kajola Secure Escrow" onPress={() => setPaymentMode('escrow')} color={paymentMode === 'escrow' ? '#D9922A' : '#6B7280'} />
+            <Text style={{ marginTop: 6 }}>Funds held securely until work is completed.</Text>
+          </View>
         </View>
         <Button title="Create booking and pay" onPress={handleCreateBooking} />
         {message ? <Text style={{ marginTop: 16, color: '#1F2937' }}>{message}</Text> : null}

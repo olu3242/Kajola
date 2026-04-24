@@ -12,8 +12,9 @@
     "next": "14.2.5",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "@kajola/ui": "workspace:*",
-    "@kajola/api": "workspace:*"
+    "@kajola/ui": "file:../../packages/ui",
+    "@kajola/api": "file:../../packages/api",
+    "@supabase/supabase-js": "^2.30.0"
   },
   "devDependencies": {
     "typescript": "^5.5.4",

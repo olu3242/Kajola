@@ -21,6 +21,7 @@ export default function ConfirmBookingPage({ params }: { params: { artisanId: st
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [paymentMode, setPaymentMode] = useState<'instant' | 'escrow'>('instant');
 
   useEffect(() => {
     async function load() {
@@ -59,7 +60,8 @@ export default function ConfirmBookingPage({ params }: { params: { artisanId: st
         body: JSON.stringify({
           slot_id: params.slotId,
           service_id: params.serviceId,
-          artisan_id: params.artisanId
+          artisan_id: params.artisanId,
+          payment_mode: paymentMode
         })
       });
 
@@ -90,7 +92,12 @@ export default function ConfirmBookingPage({ params }: { params: { artisanId: st
         return;
       }
 
-      setMessage(`Booking created. Pay at: ${paymentData.payment_url}`);
+      if (paymentData.payment_url) {
+        window.location.href = paymentData.payment_url;
+        return;
+      }
+
+      setMessage('Booking created, but no payment link was returned.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unexpected error');
     } finally {
@@ -129,6 +136,19 @@ export default function ConfirmBookingPage({ params }: { params: { artisanId: st
         {!accessToken ? (
           <p style={{ color: '#B91C1C' }}>You must be signed in to create a booking.</p>
         ) : null}
+        <fieldset style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 16 }}>
+          <legend style={{ fontWeight: 700 }}>Payment option</legend>
+          <label style={{ display: 'block', marginTop: 10 }}>
+            <input type="radio" checked={paymentMode === 'instant'} onChange={() => setPaymentMode('instant')} />
+            <span style={{ marginLeft: 8 }}>Pay Artisan Directly (Fastest)</span>
+          </label>
+          <p style={{ margin: '6px 0 12px 24px', color: '#4b5563' }}>Pay directly to artisan for faster service.</p>
+          <label style={{ display: 'block' }}>
+            <input type="radio" checked={paymentMode === 'escrow'} onChange={() => setPaymentMode('escrow')} />
+            <span style={{ marginLeft: 8 }}>Use Kajola Secure Escrow (Recommended for large jobs)</span>
+          </label>
+          <p style={{ margin: '6px 0 0 24px', color: '#4b5563' }}>Funds held securely until work is completed.</p>
+        </fieldset>
         <button
           type="submit"
           style={{ padding: '14px 24px', borderRadius: 12, background: '#D9922A', color: '#0B0705', border: 'none', fontWeight: 700 }}

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { Button, SafeAreaView, ScrollView, Text, TextInput, View } from 'react-native';
+import GoogleSignInButton from './GoogleSignInButton';
 
 export default function LoginScreen() {
   const [phone, setPhone] = useState('');
@@ -89,6 +90,7 @@ export default function LoginScreen() {
           <Button title="Sign in" onPress={handleLogin} />
           {message ? <Text style={{ marginTop: 16, color: '#1F2937' }}>{message}</Text> : null}
         </View>
+        <GoogleSignInButton />
       </ScrollView>
     </SafeAreaView>
   );
