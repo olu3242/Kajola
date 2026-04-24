@@ -139,4 +139,4 @@ MIT — use freely in personal and commercial projects.
 
 ## Author
 
-Built by **Femi Adeyemo** ([@femi-adeyemo](https://github.com/femi-adeyemo)) · [EduRadius LLC](https://eduradius.com) · AI Product Architect
+Built by **Femi Adeyemo** ([@femi-adeyemo](https://github.com/olu3242)) · [EduRadius LLC](https://eduradius.com) · AI Product Architect
