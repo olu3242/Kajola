@@ -1517,3 +1517,209 @@ apps/mobile/
 │   └── offline-queue.ts                # AsyncStorage queue; processes on foreground + network restore
 └── constants/
     └── theme.ts                        # Colors: primary #0A3D62, accent #F39C12, error #C0392B; spacing 4/8/12/16/24/32
+
+---
+
+## Section 6 — Monorepo Layout
+
+```
+toolhire-pro/
+├── apps/
+│   ├── web/                            # Next.js 14 dashboard (see Section 5.1)
+│   └── mobile/                         # Expo 51 app (see Section 5.2)
+├── packages/
+│   ├── ui/
+│   │   ├── src/
+│   │   │   ├── Button.tsx
+│   │   │   ├── Avatar.tsx
+│   │   │   ├── DateRangePicker.tsx     # Shared calendar component used on web and mobile
+│   │   │   └── index.ts
+│   │   └── package.json                # name: "@toolhire/ui"
+│   ├── types/
+│   │   ├── src/
+│   │   │   ├── database.ts             # Supabase-generated types
+│   │   │   ├── api.ts                  # Request/response types for all Edge Functions
+│   │   │   └── index.ts
+│   │   └── package.json                # name: "@toolhire/types"
+│   ├── utils/
+│   │   ├── src/
+│   │   │   ├── currency.ts             # koboToNaira(), formatNGN(), rentalTotal()
+│   │   │   ├── phone.ts                # normalizePhone(), formatPhoneDisplay()
+│   │   │   ├── date.ts                 # formatDateRange(), rentalDays(), formatRelative()
+│   │   │   └── index.ts
+│   │   └── package.json                # name: "@toolhire/utils"
+│   └── config/
+│       ├── eslint/index.js
+│       ├── typescript/base.json
+│       └── tailwind/index.js
+├── supabase/
+│   ├── migrations/
+│   │   └── 20260401000000_initial.sql  # Full schema from Section 3
+│   ├── functions/
+│   │   ├── auth-send-otp/index.ts      # Rate check → OTP → bcrypt → Termii
+│   │   ├── auth-verify-otp/index.ts    # Hash compare → createUser/signIn → return JWT
+│   │   ├── equipment-search/index.ts   # PostGIS + FTS + date availability check + pagination
+│   │   ├── equipment-availability/index.ts  # Blocked ranges from rentals + owner blocks
+│   │   ├── rentals-create/index.ts     # Validate dates → check conflict → create rental → initiate payment
+│   │   ├── rentals-action/index.ts     # confirm / checkout-photos / acknowledge / checkin-photos / cancel
+│   │   ├── payments-initiate/index.ts  # Create transaction → Paystack initialize → return checkout URL
+│   │   ├── payments-release-deposit/index.ts  # Paystack refund for deposit amount after clean return
+│   │   ├── webhooks-paystack/index.ts  # HMAC verify → log → enqueue automation job
+│   │   ├── automation-process/index.ts # Poll pending jobs → dispatch handlers → update status
+│   │   ├── admin-stats/index.ts        # Aggregate GMV, active rentals, utilisation, disputes
+│   │   └── admin-actions/index.ts      # Listing verification, dispute resolution
+│   └── seed.sql
+├── turbo.json
+├── package.json
+└── .env.example
+```
+
+### Edge Function Summary
+
+| Function | Method | Path | Trigger |
+|---|---|---|---|
+| auth-send-otp | POST | /auth/send-otp | Client request |
+| auth-verify-otp | POST | /auth/verify-otp | Client request |
+| equipment-search | GET | /equipment/search | Client request |
+| equipment-availability | GET | /equipment/:id/availability | Client request |
+| rentals-create | POST | /rentals | Client request |
+| rentals-action | POST | /rentals/:id/:action | Client request |
+| payments-initiate | POST | /payments/initiate | Internal (called by rentals-create) |
+| payments-release-deposit | POST | /payments/release-deposit | Internal (called by automation job) |
+| webhooks-paystack | POST | /webhooks/paystack | Paystack webhook |
+| automation-process | POST | /automation/process | pg_cron every 1 minute |
+| admin-stats | GET | /admin/stats | Admin client request |
+| admin-actions | POST | /admin/* | Admin client request |
+
+---
+
+## Section 7 — Automation Engine
+
+### 7.1 Event Catalogue
+
+| Event Name | Trigger | Handler | Idempotency Key |
+|---|---|---|---|
+| `payment.confirmed` | Paystack `charge.success` webhook | Update rental → confirmed; SMS to owner | `paystack:{reference}` |
+| `rental.confirmed` | Rental status → confirmed | SMS + push to renter with owner contact and yard address | `rental_confirmed:{rental_id}` |
+| `rental.reminder_48h` | 48 hours before `starts_on` | SMS to owner: "Rental starts in 2 days — prepare equipment and take checkout photos" | `reminder_48h:{rental_id}` |
+| `rental.reminder_24h` | 24 hours before `starts_on` | SMS + push to renter: "Your equipment arrives tomorrow. Review the checkout photos in-app." | `reminder_24h:{rental_id}` |
+| `rental.return_reminder` | 24 hours before `ends_on` | SMS to renter: "Your rental ends tomorrow. Arrange return with the owner." | `return_reminder:{rental_id}` |
+| `deposit.release` | Condition checkin verdict = 'clean' | Paystack refund of full deposit to renter's card | `deposit_release:{rental_id}` |
+| `deposit.partial_release` | Checkin verdict = 'damaged', renter accepted deduction | Paystack refund of (deposit − deduction); credit deduction to owner wallet | `deposit_partial:{rental_id}` |
+| `payout.rental` | Rental status → completed | Paystack Transfer to owner recipient code; credit owner wallet | `payout_rental:{rental_id}` |
+| `review.requested` | 2 hours after rental.completed | Push to renter: "Rate the equipment and owner" | `review_request:{rental_id}` |
+| `dispute.opened` | Dispute row created | SMS to admin; freeze deposit payout | `dispute_opened:{dispute_id}` |
+| `rental.auto_cancel` | pg_cron: rental pending > 6 hours | Cancel unconfirmed rentals; initiate full refund | `auto_cancel:{rental_id}` |
+| `featured.expired` | `featured_until < now()` | Set `is_featured = false`; SMS owner | `featured_expired:{equipment_id}:{featured_until}` |
+
+### 7.2 Retry Schedule
+
+| Attempt | Delay |
+|---|---|
+| 1 | Immediate |
+| 2 | +5 minutes |
+| 3 | +30 minutes |
+| Dead | status = 'dead'; SMS alert to `ADMIN_ALERT_PHONE` |
+
+### 7.3 Cron Jobs
+
+```sql
+-- Process pending automation jobs every minute
+SELECT cron.schedule('process-automation-jobs', '* * * * *',
+  $$ SELECT net.http_post(url := current_setting('app.edge_fn_url') || '/automation/process',
+     headers := jsonb_build_object('Authorization','Bearer ' || current_setting('app.service_role_key')),
+     body := '{}'::jsonb); $$);
+
+-- Auto-cancel rentals unconfirmed for more than 6 hours
+SELECT cron.schedule('auto-cancel-unconfirmed', '*/30 * * * *', $$
+  INSERT INTO automation_jobs (job_type, payload, idempotency_key)
+  SELECT 'rental.auto_cancel',
+    jsonb_build_object('rental_id', id),
+    'auto_cancel:' || id
+  FROM rentals
+  WHERE status = 'pending' AND created_at < now() - interval '6 hours'
+  ON CONFLICT (idempotency_key) DO NOTHING;
+$$);
+
+-- Schedule 48h owner prep reminders
+SELECT cron.schedule('schedule-48h-reminders', '0 * * * *', $$
+  INSERT INTO automation_jobs (job_type, payload, idempotency_key, next_run_at)
+  SELECT 'rental.reminder_48h',
+    jsonb_build_object('rental_id', id),
+    'reminder_48h:' || id,
+    (starts_on - interval '2 days')::timestamptz AT TIME ZONE 'Africa/Lagos'
+  FROM rentals
+  WHERE status = 'confirmed'
+    AND starts_on = current_date + 2
+  ON CONFLICT (idempotency_key) DO NOTHING;
+$$);
+
+-- Schedule return reminders
+SELECT cron.schedule('schedule-return-reminders', '0 8 * * *', $$
+  INSERT INTO automation_jobs (job_type, payload, idempotency_key, next_run_at)
+  SELECT 'rental.return_reminder',
+    jsonb_build_object('rental_id', id),
+    'return_reminder:' || id,
+    (ends_on - interval '1 day')::timestamptz AT TIME ZONE 'Africa/Lagos'
+  FROM rentals
+  WHERE status = 'active'
+    AND ends_on = current_date + 1
+  ON CONFLICT (idempotency_key) DO NOTHING;
+$$);
+
+-- Expire featured listings daily at 00:05 WAT
+SELECT cron.schedule('expire-featured-listings', '5 23 * * *', $$
+  INSERT INTO automation_jobs (job_type, payload, idempotency_key)
+  SELECT 'featured.expired',
+    jsonb_build_object('equipment_id', id),
+    'featured_expired:' || id || ':' || featured_until
+  FROM equipment
+  WHERE is_featured = true AND featured_until < now()
+  ON CONFLICT (idempotency_key) DO NOTHING;
+$$);
+
+-- Daily payout reconciliation at 06:00 WAT (05:00 UTC)
+SELECT cron.schedule('reconcile-payouts', '0 5 * * *', $$
+  INSERT INTO automation_jobs (job_type, payload, idempotency_key)
+  SELECT 'payout.reconcile', jsonb_build_object('date', now()::date - 1), 'reconcile:' || (now()::date - 1)
+  ON CONFLICT (idempotency_key) DO NOTHING;
+$$);
+```
+
+### 7.4 Webhook Security (Paystack)
+
+```typescript
+// webhooks-paystack/index.ts
+import { createHmac } from "node:crypto";
+
+export async function handlePaystackWebhook(req: Request): Promise<Response> {
+  const signature = req.headers.get("x-paystack-signature");
+  if (!signature) return new Response("Unauthorized", { status: 401 });
+
+  const rawBody = await req.text();
+  const expectedHash = createHmac("sha512", Deno.env.get("PAYSTACK_WEBHOOK_SECRET")!)
+    .update(rawBody)
+    .digest("hex");
+
+  if (expectedHash !== signature) return new Response("Unauthorized", { status: 401 });
+
+  const payload = JSON.parse(rawBody);
+  const idempotencyKey = `paystack:${payload.data?.reference}`;
+
+  // Log raw payload immediately before any processing
+  await supabaseAdmin.from("webhook_logs").insert({
+    provider: "paystack",
+    event_type: payload.event,
+    payload,
+    idempotency_key: idempotencyKey,
+  });
+
+  // Enqueue job — return 200 before processing
+  await supabaseAdmin.from("automation_jobs").insert({
+    job_type: "payment.confirmed",
+    payload: { reference: payload.data?.reference, event: payload.event },
+    idempotency_key: idempotencyKey,
+  }).onConflict("idempotency_key").ignore();
+
+  return new Response(JSON.stringify({ received: true }), { status: 200 });
+}
