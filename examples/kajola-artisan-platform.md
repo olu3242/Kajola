@@ -910,3 +910,676 @@ VALUES ('00000000-0000-0000-0000-000000000001', 'Kajola', 'kajola', 'enterprise'
 -- INSERT INTO users (id, tenant_id, phone, role, full_name)
 -- VALUES ('<auth.users.id>', '00000000-0000-0000-0000-000000000001', '+2348000000000', 'super_admin', 'Kajola Admin');
 ```
+
+---
+
+## Section 4 — API Definitions
+
+Base URL: `https://<project-ref>.supabase.co/functions/v1`
+All authenticated endpoints require: `Authorization: Bearer <jwt>`
+All amounts in kobo (1 NGN = 100 kobo).
+
+---
+
+### Auth
+
+```
+POST /auth/send-otp
+Auth: none
+Description: Send a 6-digit OTP to the given phone number via Termii SMS.
+
+Request:
+{
+  "phone": string   // E.164 format, e.g. "+2348012345678"
+}
+
+Response 200:
+{
+  "message": "OTP sent",
+  "expires_in": 600
+}
+
+Errors:
+- 400: Invalid phone format (must match /^\+[1-9]\d{7,14}$/)
+- 429: Rate limit exceeded — max 3 OTP requests per phone per 10 minutes
+```
+
+```
+POST /auth/verify-otp
+Auth: none
+Description: Verify OTP and return a Supabase session. Creates user record on first login.
+
+Request:
+{
+  "phone": string,
+  "otp":   string   // 6-digit code
+}
+
+Response 200:
+{
+  "access_token":  string,
+  "refresh_token": string,
+  "expires_in":    3600,
+  "user": {
+    "id":    uuid,
+    "phone": string,
+    "role":  "client" | "artisan" | "admin" | "super_admin",
+    "is_new": boolean
+  }
+}
+
+Errors:
+- 400: Missing phone or otp field
+- 401: Invalid or expired OTP
+- 429: Too many attempts — max 5 verification attempts per OTP token
+```
+
+---
+
+### Artisans
+
+```
+GET /artisans/search
+Auth: bearer (optional — unauthenticated allowed)
+Description: Search artisans by category, location radius, and price range.
+
+Query params:
+  category        artisan_category   Filter by service category
+  lat             float              Client latitude (required if lng provided)
+  lng             float              Client longitude (required if lat provided)
+  radius_km       integer            Search radius in km (default: 10, max: 50)
+  min_rate_kobo   integer            Minimum base rate filter
+  max_rate_kobo   integer            Maximum base rate filter
+  min_rating      float              Minimum average rating (0–5)
+  q               string             Free-text search (name, bio, location)
+  page            integer            Page number (default: 1)
+  per_page        integer            Results per page (default: 20, max: 50)
+
+Response 200:
+{
+  "data": [
+    {
+      "id":                 uuid,
+      "user_id":            uuid,
+      "full_name":          string,
+      "avatar_url":         string | null,
+      "category":           artisan_category,
+      "bio":                string | null,
+      "base_rate_kobo":     integer,
+      "average_rating":     float,
+      "total_reviews":      integer,
+      "location_text":      string,
+      "distance_km":        float | null,
+      "is_featured":        boolean,
+      "verification_status": "unverified" | "pending" | "verified"
+    }
+  ],
+  "total": integer,
+  "page":  integer,
+  "per_page": integer
+}
+
+Errors:
+- 400: lat provided without lng or vice versa
+- 400: radius_km exceeds maximum of 50
+```
+
+```
+GET /artisans/:id
+Auth: bearer (optional)
+Description: Get full artisan profile including services and recent reviews.
+
+Response 200:
+{
+  "id":                 uuid,
+  "user_id":            uuid,
+  "full_name":          string,
+  "avatar_url":         string | null,
+  "category":           artisan_category,
+  "bio":                string,
+  "years_experience":   integer,
+  "base_rate_kobo":     integer,
+  "location_text":      string,
+  "service_radius_km":  integer,
+  "average_rating":     float,
+  "total_reviews":      integer,
+  "verification_status": string,
+  "is_featured":        boolean,
+  "services": [
+    {
+      "id":               uuid,
+      "name":             string,
+      "description":      string | null,
+      "price_kobo":       integer,
+      "duration_minutes": integer
+    }
+  ],
+  "portfolio_photos": [
+    { "id": uuid, "storage_path": string, "caption": string | null }
+  ],
+  "recent_reviews": [
+    {
+      "id":          uuid,
+      "rating":      integer,
+      "comment":     string | null,
+      "client_name": string,
+      "created_at":  string
+    }
+  ]
+}
+
+Errors:
+- 404: Artisan not found or deleted
+```
+
+```
+POST /artisans/profile
+Auth: bearer (artisan role required)
+Description: Create artisan profile for the authenticated user.
+
+Request:
+{
+  "category":          artisan_category,
+  "bio":               string,              // max 500 chars
+  "years_experience":  integer,
+  "base_rate_kobo":    integer,             // minimum 50000 (₦500)
+  "location_text":     string,
+  "lat":               float,
+  "lng":               float,
+  "service_radius_km": integer              // default 10
+}
+
+Response 201:
+{
+  "id":      uuid,
+  "user_id": uuid,
+  "category": artisan_category,
+  "created_at": string
+}
+
+Errors:
+- 400: base_rate_kobo below minimum (50000 kobo = ₦500)
+- 409: Artisan profile already exists for this user
+- 422: category not a valid artisan_category enum value
+```
+
+```
+PATCH /artisans/profile
+Auth: bearer (artisan role, own profile only)
+Description: Update artisan profile fields. All fields optional.
+
+Request:
+{
+  "bio":               string | null,
+  "years_experience":  integer | null,
+  "base_rate_kobo":    integer | null,
+  "location_text":     string | null,
+  "lat":               float | null,
+  "lng":               float | null,
+  "service_radius_km": integer | null
+}
+
+Response 200:
+{ "id": uuid, "updated_at": string }
+
+Errors:
+- 403: Authenticated user does not own an artisan profile
+- 422: Validation error on any field
+```
+
+---
+
+### Services
+
+```
+POST /services
+Auth: bearer (artisan)
+Description: Add a service to the artisan's profile.
+
+Request:
+{
+  "name":             string,    // max 100 chars
+  "description":      string,    // max 300 chars, optional
+  "price_kobo":       integer,   // minimum 50000
+  "duration_minutes": integer    // minimum 15, maximum 480
+}
+
+Response 201:
+{
+  "id": uuid, "artisan_id": uuid, "name": string,
+  "price_kobo": integer, "duration_minutes": integer
+}
+
+Errors:
+- 400: duration_minutes out of range (15–480)
+- 403: User has no artisan profile
+```
+
+```
+PATCH /services/:id
+Auth: bearer (artisan, own service)
+Description: Update a service. All fields optional.
+
+Request:
+{
+  "name": string | null, "description": string | null,
+  "price_kobo": integer | null, "duration_minutes": integer | null,
+  "is_active": boolean | null
+}
+
+Response 200:
+{ "id": uuid, "updated_at": string }
+
+Errors:
+- 403: Artisan does not own this service
+- 404: Service not found
+```
+
+---
+
+### Availability
+
+```
+GET /artisans/:id/availability
+Auth: bearer (optional)
+Description: Return available time slots for an artisan on a given date.
+
+Query params:
+  date   string   ISO date, e.g. "2026-04-28" (required)
+
+Response 200:
+{
+  "date": "2026-04-28",
+  "artisan_id": uuid,
+  "slots": [
+    { "starts_at": "2026-04-28T09:00:00+01:00", "ends_at": "2026-04-28T10:00:00+01:00" }
+  ]
+}
+
+Errors:
+- 400: date is in the past or more than 60 days in the future
+- 404: Artisan not found
+```
+
+```
+PUT /artisans/availability/rules
+Auth: bearer (artisan)
+Description: Replace all weekly availability rules for the artisan.
+
+Request:
+{
+  "rules": [
+    { "day_of_week": integer, "start_time": "09:00", "end_time": "18:00" }
+  ]
+}
+
+Response 200:
+{ "rules_saved": integer }
+
+Errors:
+- 400: end_time not after start_time
+- 400: day_of_week not between 0 and 6
+- 403: No artisan profile for user
+```
+
+---
+
+### Bookings
+
+```
+POST /bookings
+Auth: bearer (client)
+Description: Create a booking and initiate payment. Returns Paystack checkout URL.
+
+Request:
+{
+  "artisan_id":    uuid,
+  "service_id":    uuid,
+  "starts_at":     string,   // ISO 8601 with timezone, e.g. "2026-04-28T10:00:00+01:00"
+  "address_text":  string,
+  "lat":           float,
+  "lng":           float,
+  "client_note":   string    // optional, max 300 chars
+}
+
+Response 201:
+{
+  "booking_id":        uuid,
+  "transaction_id":    uuid,
+  "paystack_reference": string,
+  "checkout_url":      string,   // Paystack authorization_url
+  "expires_at":        string    // checkout session expiry (30 minutes)
+}
+
+Errors:
+- 400: starts_at is in the past or less than 1 hour from now
+- 404: artisan_id or service_id not found
+- 409: Time slot is no longer available (booking conflict)
+- 422: Address fields missing or invalid coordinates
+```
+
+```
+POST /bookings/:id/confirm
+Auth: bearer (artisan, own bookings)
+Description: Artisan confirms a pending booking.
+
+Response 200:
+{ "booking_id": uuid, "status": "confirmed" }
+
+Errors:
+- 403: User is not the artisan for this booking
+- 404: Booking not found
+- 409: Booking is not in 'pending' status
+```
+
+```
+POST /bookings/:id/start
+Auth: bearer (artisan)
+Description: Artisan marks job as started (in_progress).
+
+Response 200:
+{ "booking_id": uuid, "status": "in_progress" }
+
+Errors:
+- 403: Not the artisan for this booking
+- 409: Booking not in 'confirmed' status
+```
+
+```
+POST /bookings/:id/complete
+Auth: bearer (artisan)
+Description: Artisan marks job complete. Triggers payout automation job.
+
+Response 200:
+{ "booking_id": uuid, "status": "completed", "payout_scheduled": true }
+
+Errors:
+- 403: Not the artisan for this booking
+- 409: Booking not in 'in_progress' status
+```
+
+```
+POST /bookings/:id/cancel
+Auth: bearer (client or artisan)
+Description: Cancel a booking. Triggers refund if payment was captured.
+
+Request:
+{
+  "reason": string   // required, max 300 chars
+}
+
+Response 200:
+{ "booking_id": uuid, "status": "cancelled", "refund_initiated": boolean }
+
+Errors:
+- 403: User is not a participant in this booking
+- 409: Booking cannot be cancelled (completed or already cancelled)
+```
+
+```
+GET /bookings
+Auth: bearer
+Description: List bookings for the authenticated user (client or artisan).
+
+Query params:
+  status    booking_status    Filter by status (optional)
+  page      integer           Default 1
+  per_page  integer           Default 20, max 50
+
+Response 200:
+{
+  "data": [ { ...booking fields + artisan_name + service_name } ],
+  "total": integer, "page": integer, "per_page": integer
+}
+```
+
+---
+
+### Payments
+
+```
+POST /webhooks/paystack
+Auth: none (verified via X-Paystack-Signature HMAC header)
+Description: Receive Paystack payment events. Returns 200 immediately; processes async.
+
+Headers:
+  X-Paystack-Signature: sha512 HMAC of raw body using PAYSTACK_WEBHOOK_SECRET
+
+Request: Raw Paystack webhook payload (JSON)
+
+Response 200:
+{ "received": true }
+
+Errors:
+- 400: Missing X-Paystack-Signature header
+- 401: HMAC signature mismatch
+```
+
+---
+
+### Reviews
+
+```
+POST /reviews
+Auth: bearer (client)
+Description: Submit a review for a completed booking. One review per booking.
+
+Request:
+{
+  "booking_id": uuid,
+  "rating":     integer,   // 1–5
+  "comment":    string     // optional, max 500 chars
+}
+
+Response 201:
+{ "id": uuid, "booking_id": uuid, "rating": integer }
+
+Errors:
+- 403: Authenticated user is not the client for this booking
+- 404: Booking not found
+- 409: Review already exists for this booking
+- 422: Booking status is not 'completed'
+```
+
+---
+
+### Admin
+
+```
+GET /admin/stats
+Auth: bearer (admin or super_admin)
+Description: Platform health metrics for the admin dashboard.
+
+Response 200:
+{
+  "gmv_today_kobo":          integer,
+  "gmv_this_month_kobo":     integer,
+  "bookings_today":          integer,
+  "active_artisans":         integer,
+  "registered_clients":      integer,
+  "open_disputes":           integer,
+  "pending_verifications":   integer,
+  "avg_rating_platform":     float
+}
+
+Errors:
+- 403: User does not have admin role
+```
+
+```
+POST /admin/disputes/:id/resolve
+Auth: bearer (admin or super_admin)
+Description: Resolve a dispute in favour of client or artisan.
+
+Request:
+{
+  "resolution":      "client" | "artisan",
+  "resolution_note": string
+}
+
+Response 200:
+{ "dispute_id": uuid, "status": "resolved_client" | "resolved_artisan" }
+
+Errors:
+- 400: resolution not one of the allowed values
+- 403: Not an admin
+- 404: Dispute not found
+- 409: Dispute already resolved
+```
+
+```
+PATCH /admin/artisans/:id/verify
+Auth: bearer (admin or super_admin)
+Description: Set artisan verification status.
+
+Request:
+{
+  "status": "verified" | "rejected",
+  "note":   string   // optional — shown to artisan on rejection
+}
+
+Response 200:
+{ "artisan_id": uuid, "verification_status": string }
+
+Errors:
+- 403: Not an admin
+- 404: Artisan profile not found
+```
+
+---
+
+## Section 5 — Frontend Structure
+
+### 5.1 Next.js 14 Web Dashboard
+
+```
+apps/web/
+├── app/
+│   ├── (auth)/
+│   │   ├── login/
+│   │   │   └── page.tsx              # Phone number input with Nigeria (+234) default flag
+│   │   └── verify/
+│   │       └── page.tsx              # 6-digit OTP input with 60s resend countdown
+│   ├── (artisan)/
+│   │   ├── layout.tsx                # Sidebar nav + auth guard (artisan role)
+│   │   ├── dashboard/page.tsx        # Earnings summary, upcoming bookings, avg rating
+│   │   ├── bookings/
+│   │   │   ├── page.tsx              # Bookings list with status filter tabs
+│   │   │   └── [id]/page.tsx         # Booking detail: client info, map, action buttons
+│   │   ├── services/page.tsx         # Services CRUD — add/edit/toggle active
+│   │   ├── availability/page.tsx     # Weekly schedule grid + block-off date picker
+│   │   ├── wallet/page.tsx           # Earnings history, pending payouts, bank account
+│   │   └── profile/page.tsx          # Edit bio, photo upload, location picker
+│   ├── (client)/
+│   │   ├── layout.tsx                # Top nav + auth guard (client role)
+│   │   ├── page.tsx                  # Home: search bar, category chips, nearby artisans
+│   │   ├── search/page.tsx           # Full search with map/list toggle, filters panel
+│   │   ├── artisans/[id]/page.tsx    # Artisan profile: services, reviews, book CTA
+│   │   ├── book/[artisanId]/page.tsx # Booking flow: select service → slot → address → pay
+│   │   ├── bookings/
+│   │   │   ├── page.tsx              # My bookings list
+│   │   │   └── [id]/page.tsx         # Booking detail with live status, rate CTA
+│   │   └── profile/page.tsx          # Edit name, avatar, saved addresses
+│   ├── (admin)/
+│   │   ├── layout.tsx                # Admin sidebar + super_admin guard
+│   │   ├── page.tsx                  # Dashboard: GMV chart, stats cards, dispute queue
+│   │   ├── artisans/
+│   │   │   ├── page.tsx              # Artisan list with verification filter
+│   │   │   └── [id]/page.tsx         # Artisan detail: profile, bookings, verify/reject
+│   │   ├── bookings/page.tsx         # All bookings with search and status filter
+│   │   ├── disputes/
+│   │   │   ├── page.tsx              # Open disputes queue
+│   │   │   └── [id]/page.tsx         # Dispute detail: evidence, resolve form
+│   │   └── settings/page.tsx         # Platform fee %, featured listing price, SMS templates
+│   └── api/
+│       └── webhooks/
+│           └── paystack/
+│               └── route.ts          # Verifies X-Paystack-Signature, forwards to Edge Function
+├── components/
+│   ├── ui/                           # shadcn/ui: Button, Input, Card, Badge, Dialog, Table, Tabs, Select, Skeleton
+│   ├── forms/
+│   │   ├── PhoneInput.tsx            # react-phone-number-input with African country list prioritised
+│   │   ├── OtpInput.tsx              # 6 individual digit inputs, auto-advance, paste support
+│   │   ├── LocationPicker.tsx        # Google Places Autocomplete + map pin drag
+│   │   └── ServiceForm.tsx           # Add/edit service with live price preview in NGN
+│   ├── bookings/
+│   │   ├── BookingCard.tsx           # Status badge, artisan/client name, time, price
+│   │   ├── BookingStatusBar.tsx      # Visual step indicator for booking lifecycle
+│   │   └── BookingActions.tsx        # Context-aware action buttons (confirm/start/complete/cancel/dispute)
+│   ├── artisans/
+│   │   ├── ArtisanCard.tsx           # Photo, name, category, rating, distance, base rate
+│   │   ├── ArtisanMap.tsx            # Google Maps with artisan markers, cluster at zoom-out
+│   │   └── ReviewList.tsx            # Paginated review list with star ratings
+│   └── layout/
+│       ├── Sidebar.tsx               # Role-aware navigation links
+│       └── TopNav.tsx                # User avatar, notifications bell, sign out
+├── lib/
+│   ├── supabase/
+│   │   ├── client.ts                 # createBrowserClient() — used in Client Components
+│   │   └── server.ts                 # createServerClient() — used in Server Components and Route Handlers
+│   ├── payments/
+│   │   └── paystack.ts               # initializeTransaction(), verifyTransaction(), createRecipient(), initiateTransfer()
+│   └── sms/
+│       └── termii.ts                 # sendOtp(), sendSms() — server-only, never imported client-side
+├── hooks/
+│   ├── useUser.ts                    # Auth state, user profile, role check helpers
+│   ├── useBookings.ts                # Booking list with Supabase Realtime subscription
+│   └── useArtisanSearch.ts           # Debounced search with URL state sync
+└── types/
+    └── database.ts                   # Generated via: supabase gen types typescript --project-id <ref>
+```
+
+### 5.2 Expo 51 Mobile App
+
+```
+apps/mobile/
+├── app/
+│   ├── (auth)/
+│   │   ├── index.tsx                 # Phone entry: flag picker, E.164 formatter, send OTP CTA
+│   │   └── verify.tsx                # OTP: 6 digit inputs, 60s countdown, "Use WhatsApp instead" link
+│   ├── (client)/
+│   │   ├── _layout.tsx               # Bottom tab bar: Home, Search, Bookings, Profile
+│   │   ├── home.tsx                  # Category chips, featured artisans, recently booked
+│   │   ├── search.tsx                # Search bar, filters sheet, FlatList or MapView toggle
+│   │   ├── bookings.tsx              # Booking list with status tabs; pull-to-refresh
+│   │   └── profile.tsx               # Name, avatar, wallet credit, settings, sign out
+│   ├── (artisan)/
+│   │   ├── _layout.tsx               # Bottom tab bar: Dashboard, Bookings, Schedule, Wallet, Profile
+│   │   ├── dashboard.tsx             # Earnings today/week, upcoming bookings card, rating
+│   │   ├── bookings.tsx              # Incoming/active/past bookings list
+│   │   ├── schedule.tsx              # Weekly grid availability editor
+│   │   ├── wallet.tsx                # Balance, payout history, bank details
+│   │   └── profile.tsx               # Edit profile, upload portfolio photos, manage services
+│   ├── artisan/[id].tsx              # Public artisan profile: services, reviews, map, Book CTA
+│   ├── book/
+│   │   ├── service.tsx               # Step 1: select service
+│   │   ├── slot.tsx                  # Step 2: pick date and time slot
+│   │   ├── address.tsx               # Step 3: confirm/enter service address
+│   │   └── payment.tsx               # Step 4: review total, open Paystack WebView
+│   └── booking/[id].tsx              # Booking detail: status bar, actions, map, chat CTA
+├── components/
+│   ├── ui/
+│   │   ├── Button.tsx                # Variant: primary/secondary/ghost; min 48px height; loading spinner
+│   │   ├── Input.tsx                 # Keyboard-aware, label, error text, accessibilityLabel
+│   │   ├── Card.tsx                  # Rounded 12px, shadow, press feedback
+│   │   ├── SkeletonLoader.tsx        # Shimmer animation for list placeholders
+│   │   ├── EmptyState.tsx            # SVG illustration + heading + optional CTA button
+│   │   ├── StarRating.tsx            # Interactive or display-only star component
+│   │   └── BottomSheet.tsx           # Reanimated bottom sheet for filters and action menus
+│   ├── artisans/
+│   │   ├── ArtisanCard.tsx           # Horizontal card: avatar, name, category, rating, rate
+│   │   └── ArtisanMapMarker.tsx      # Custom map pin with category icon
+│   └── bookings/
+│       ├── BookingStatusBadge.tsx    # Colour-coded pill: pending=amber, confirmed=blue, etc.
+│       └── BookingActionSheet.tsx    # Bottom sheet with context actions for the booking
+├── hooks/
+│   ├── useAuth.ts                    # Session, user, signOut, role
+│   ├── useOfflineQueue.ts            # Queue write actions offline; sync on reconnect via NetInfo
+│   ├── useLocation.ts                # expo-location permission request + current coords
+│   └── useRealtimeBooking.ts         # Subscribe to booking row changes via Supabase Realtime
+├── lib/
+│   ├── supabase.ts                   # createClient with AsyncStorage session persistence
+│   ├── notifications.ts              # registerForPushNotificationsAsync(), handleNotificationResponse()
+│   └── offline-queue.ts             # AsyncStorage-backed queue; processes on app foreground + network restore
+└── constants/
+    └── theme.ts                      # Colors: primary #1A6B3C, accent #F5A623, error #D93025; spacing scale 4/8/12/16/24/32; fontSizes 12/14/16/18/24/32
