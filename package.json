@@ -1,0 +1,22 @@
+{
+  "name": "kajola",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "migrations:validate": "pwsh ./scripts/migrations/validate.ps1",
+    "migrations:drift": "pwsh ./scripts/migrations/check-drift.ps1",
+    "migrations:deploy": "pwsh ./scripts/migrations/deploy.ps1"
+  },
+  "devDependencies": {
+    "turbo": "^1.10.2",
+    "typescript": "^5.5.4",
+    "prettier": "^3.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

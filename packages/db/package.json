@@ -1,0 +1,12 @@
+{
+  "name": "@kajola/db",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "private": true,
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
