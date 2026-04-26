@@ -1583,3 +1583,279 @@ apps/mobile/
 │   └── offline-queue.ts             # AsyncStorage-backed queue; processes on app foreground + network restore
 └── constants/
     └── theme.ts                      # Colors: primary #1A6B3C, accent #F5A623, error #D93025; spacing scale 4/8/12/16/24/32; fontSizes 12/14/16/18/24/32
+
+---
+
+## Section 6 — Monorepo Layout
+
+```
+kajola/
+├── apps/
+│   ├── web/                          # Next.js 14 dashboard (see Section 5.1)
+│   └── mobile/                       # Expo 51 app (see Section 5.2)
+├── packages/
+│   ├── ui/
+│   │   ├── src/
+│   │   │   ├── Button.tsx            # Base button used by both web and mobile
+│   │   │   ├── Avatar.tsx
+│   │   │   └── index.ts
+│   │   ├── package.json              # name: "@kajola/ui"
+│   │   └── tsconfig.json
+│   ├── types/
+│   │   ├── src/
+│   │   │   ├── database.ts           # Supabase-generated types (copied here for sharing)
+│   │   │   ├── api.ts                # Request/response types for all Edge Functions
+│   │   │   └── index.ts
+│   │   └── package.json              # name: "@kajola/types"
+│   ├── utils/
+│   │   ├── src/
+│   │   │   ├── currency.ts           # koboToNaira(), formatNGN(), formatKES()
+│   │   │   ├── phone.ts              # normalizePhone(), formatPhoneDisplay()
+│   │   │   ├── date.ts               # formatSlot(), formatRelativeTime(), WAT timezone helpers
+│   │   │   └── index.ts
+│   │   └── package.json              # name: "@kajola/utils"
+│   └── config/
+│       ├── eslint/
+│       │   └── index.js              # Shared ESLint config (Next.js + Expo + Prettier)
+│       ├── typescript/
+│       │   ├── base.json
+│       │   ├── nextjs.json
+│       │   └── expo.json
+│       └── tailwind/
+│           └── index.js              # Shared Tailwind preset (colors, fonts, spacing)
+├── supabase/
+│   ├── migrations/
+│   │   └── 20260401000000_initial.sql   # Full schema from Section 3
+│   ├── functions/
+│   │   ├── auth-send-otp/
+│   │   │   └── index.ts              # Rate check → generate OTP → bcrypt hash → Termii API
+│   │   ├── auth-verify-otp/
+│   │   │   └── index.ts              # Hash compare → mark verified → createUser/signIn → return JWT
+│   │   ├── artisans-search/
+│   │   │   └── index.ts              # PostGIS distance query + FTS + filters + pagination
+│   │   ├── artisans-availability/
+│   │   │   └── index.ts              # Compute free slots from rules minus existing bookings and blocks
+│   │   ├── bookings-create/
+│   │   │   └── index.ts              # Validate slot → insert booking → call payments-initiate
+│   │   ├── bookings-action/
+│   │   │   └── index.ts              # confirm / start / complete / cancel state machine
+│   │   ├── payments-initiate/
+│   │   │   └── index.ts              # Create transaction row → Paystack initialize → return checkout URL
+│   │   ├── webhooks-paystack/
+│   │   │   └── index.ts              # HMAC verify → idempotency check → log → enqueue automation job
+│   │   ├── automation-process/
+│   │   │   └── index.ts              # Poll pending jobs → dispatch handlers → update status
+│   │   ├── admin-stats/
+│   │   │   └── index.ts              # Aggregate GMV, booking counts, dispute queue size
+│   │   └── admin-actions/
+│   │       └── index.ts              # Dispute resolution, artisan verification, platform settings
+│   └── seed.sql                      # Default tenant + super admin template (see Section 3)
+├── turbo.json
+├── package.json
+└── .env.example                      # All env vars (see Section 8)
+```
+
+### Edge Function Summary
+
+| Function | Method | Path | Trigger |
+|---|---|---|---|
+| auth-send-otp | POST | /auth/send-otp | Client request |
+| auth-verify-otp | POST | /auth/verify-otp | Client request |
+| artisans-search | GET | /artisans/search | Client request |
+| artisans-availability | GET | /artisans/:id/availability | Client request |
+| bookings-create | POST | /bookings | Client request |
+| bookings-action | POST | /bookings/:id/:action | Client request |
+| payments-initiate | POST | /payments/initiate | Internal (called by bookings-create) |
+| webhooks-paystack | POST | /webhooks/paystack | Paystack webhook |
+| automation-process | POST | /automation/process | pg_cron every 1 minute |
+| admin-stats | GET | /admin/stats | Admin client request |
+| admin-actions | POST | /admin/* | Admin client request |
+
+---
+
+## Section 7 — Automation Engine
+
+### 7.1 Event Catalogue
+
+| Event Name | Trigger | Handler | Idempotency Key |
+|---|---|---|---|
+| `payment.confirmed` | Paystack webhook `charge.success` | Update booking → confirmed; send SMS to artisan | `paystack:{event.data.reference}` |
+| `booking.confirmed` | Booking status → confirmed | Send SMS + push to client with artisan details | `booking_confirmed:{booking_id}` |
+| `booking.reminder_24h` | 24 hours before `starts_at` | SMS + push to both parties: reminder with address | `reminder_24h:{booking_id}` |
+| `booking.reminder_1h` | 1 hour before `starts_at` | SMS to artisan: "You have a booking in 1 hour at {address}" | `reminder_1h:{booking_id}` |
+| `booking.completed` | Booking status → completed | Release payout, send receipt SMS, prompt client to review | `booking_completed:{booking_id}` |
+| `booking.cancelled` | Booking status → cancelled | Initiate refund if paid; send SMS to both parties | `booking_cancelled:{booking_id}` |
+| `payout.release` | `booking.completed` event | Paystack Transfer to artisan recipient code; credit wallet | `payout:{booking_id}` |
+| `review.requested` | 30 minutes after `booking.completed` | Push notification to client: "How was your experience with {artisan}?" | `review_request:{booking_id}` |
+| `dispute.opened` | Dispute row created | Notify admin via SMS; freeze payout for booking | `dispute_opened:{dispute_id}` |
+| `featured.expired` | `featured_until < now()` | Set `is_featured = false`; SMS artisan: "Your featured listing has ended" | `featured_expired:{artisan_id}:{featured_until}` |
+| `otp.whatsapp_fallback` | Termii delivery failure | Re-send OTP via Twilio WhatsApp | `otp_whatsapp:{phone}:{otp_hash_prefix}` |
+
+### 7.2 Automation Jobs Table
+
+```sql
+-- Already defined in Section 3. Key fields:
+-- job_type        text    — matches event name above (e.g. 'payout.release')
+-- payload         jsonb   — { booking_id, artisan_id, amount_kobo, ... }
+-- idempotency_key text    — prevents duplicate processing
+-- next_run_at     timestamptz — when to attempt execution
+-- attempts        integer — current attempt count
+-- max_attempts    integer — default 3
+-- status          job_status — pending → running → completed | failed | dead
+```
+
+### 7.3 Retry Schedule
+
+| Attempt | Delay | Notes |
+|---|---|---|
+| 1 | Immediate (next_run_at = now()) | First try on job creation |
+| 2 | +5 minutes | After first failure: next_run_at = now() + interval '5 minutes' |
+| 3 | +30 minutes | After second failure |
+| Dead | — | status = 'dead'; insert row into audit_logs; SMS alert to super admin phone |
+
+### 7.4 Job Processor Logic (automation-process Edge Function)
+
+```typescript
+// Called by pg_cron every minute via HTTP POST to /automation/process
+// Uses service role key — bypasses RLS
+
+async function processPendingJobs() {
+  // 1. Claim up to 10 jobs atomically
+  const jobs = await supabase.rpc('claim_pending_jobs', { batch_size: 10 });
+  // claim_pending_jobs: UPDATE automation_jobs SET status='running'
+  //   WHERE id IN (SELECT id FROM automation_jobs WHERE status='pending'
+  //   AND next_run_at <= now() LIMIT 10 FOR UPDATE SKIP LOCKED)
+  //   RETURNING *
+
+  // 2. Process each job concurrently
+  await Promise.allSettled(jobs.map(async (job) => {
+    try {
+      await dispatch(job);  // routes to handler by job.job_type
+      await supabase.from('automation_jobs')
+        .update({ status: 'completed' }).eq('id', job.id);
+    } catch (err) {
+      const nextAttempt = job.attempts + 1;
+      const isDead = nextAttempt >= job.max_attempts;
+      await supabase.from('automation_jobs').update({
+        status: isDead ? 'dead' : 'pending',
+        attempts: nextAttempt,
+        last_error: err.message,
+        next_run_at: isDead ? null : retryDelay(nextAttempt),
+      }).eq('id', job.id);
+      if (isDead) await alertAdmin(job);
+    }
+  }));
+}
+
+function retryDelay(attempt: number): Date {
+  const delays = [0, 5 * 60, 30 * 60]; // seconds
+  return new Date(Date.now() + (delays[attempt] ?? 30 * 60) * 1000);
+}
+```
+
+### 7.5 Cron Jobs
+
+```sql
+-- Process pending automation jobs every minute
+SELECT cron.schedule('process-automation-jobs', '* * * * *',
+  $$ SELECT net.http_post(url := current_setting('app.edge_fn_url') || '/automation/process',
+     headers := jsonb_build_object('Authorization','Bearer ' || current_setting('app.service_role_key')),
+     body := '{}'::jsonb); $$);
+
+-- Cancel bookings not confirmed within 30 minutes of creation
+SELECT cron.schedule('expire-unconfirmed-bookings', '*/15 * * * *', $$
+  UPDATE bookings SET status = 'cancelled', cancellation_reason = 'Auto-cancelled: artisan did not confirm within 30 minutes'
+  WHERE status = 'pending' AND created_at < now() - interval '30 minutes';
+$$);
+
+-- Schedule 24h reminders
+SELECT cron.schedule('schedule-24h-reminders', '0 * * * *', $$
+  INSERT INTO automation_jobs (job_type, payload, idempotency_key, next_run_at)
+  SELECT 'booking.reminder_24h',
+    jsonb_build_object('booking_id', id),
+    'reminder_24h:' || id,
+    starts_at - interval '24 hours'
+  FROM bookings
+  WHERE status = 'confirmed'
+    AND starts_at BETWEEN now() + interval '23 hours' AND now() + interval '25 hours'
+  ON CONFLICT (idempotency_key) DO NOTHING;
+$$);
+
+-- Schedule 1h reminders
+SELECT cron.schedule('schedule-1h-reminders', '*/30 * * * *', $$
+  INSERT INTO automation_jobs (job_type, payload, idempotency_key, next_run_at)
+  SELECT 'booking.reminder_1h',
+    jsonb_build_object('booking_id', id),
+    'reminder_1h:' || id,
+    starts_at - interval '1 hour'
+  FROM bookings
+  WHERE status = 'confirmed'
+    AND starts_at BETWEEN now() + interval '30 minutes' AND now() + interval '90 minutes'
+  ON CONFLICT (idempotency_key) DO NOTHING;
+$$);
+
+-- Expire featured listings daily at 00:05 WAT (23:05 UTC)
+SELECT cron.schedule('expire-featured-listings', '5 23 * * *', $$
+  INSERT INTO automation_jobs (job_type, payload, idempotency_key)
+  SELECT 'featured.expired',
+    jsonb_build_object('artisan_id', id),
+    'featured_expired:' || id || ':' || featured_until
+  FROM artisan_profiles
+  WHERE is_featured = true AND featured_until < now()
+  ON CONFLICT (idempotency_key) DO NOTHING;
+$$);
+
+-- Daily Paystack payout reconciliation at 06:00 WAT (05:00 UTC)
+SELECT cron.schedule('reconcile-payouts', '0 5 * * *', $$
+  INSERT INTO automation_jobs (job_type, payload, idempotency_key)
+  SELECT 'payout.reconcile',
+    jsonb_build_object('date', now()::date - 1),
+    'reconcile:' || (now()::date - 1)
+  ON CONFLICT (idempotency_key) DO NOTHING;
+$$);
+```
+
+### 7.6 Webhook Security (Paystack)
+
+```typescript
+// In webhooks-paystack/index.ts
+import { createHmac } from "node:crypto";
+
+export async function verifyPaystackWebhook(req: Request): Promise<boolean> {
+  const signature = req.headers.get("x-paystack-signature");
+  if (!signature) return false;
+
+  const body = await req.text();  // must read raw body BEFORE parsing JSON
+  const hash = createHmac("sha512", Deno.env.get("PAYSTACK_WEBHOOK_SECRET")!)
+    .update(body)
+    .digest("hex");
+
+  return hash === signature;
+}
+
+export async function handlePaystackWebhook(req: Request): Promise<Response> {
+  if (!(await verifyPaystackWebhook(req))) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const payload = await req.json();
+  const idempotencyKey = `paystack:${payload.data?.reference}`;
+
+  // Log raw payload immediately — before any processing
+  await supabaseAdmin.from("webhook_logs").insert({
+    provider: "paystack",
+    event_type: payload.event,
+    payload,
+    idempotency_key: idempotencyKey,
+  });
+
+  // Return 200 immediately; Paystack requires < 5s response
+  // Enqueue async job for actual processing
+  await supabaseAdmin.from("automation_jobs").insert({
+    job_type: "payment.confirmed",
+    payload: { reference: payload.data?.reference, event: payload.event },
+    idempotency_key: idempotencyKey,
+  }).onConflict("idempotency_key").ignore();
+
+  return new Response(JSON.stringify({ received: true }), { status: 200 });
+}
