@@ -1859,3 +1859,367 @@ export async function handlePaystackWebhook(req: Request): Promise<Response> {
 
   return new Response(JSON.stringify({ received: true }), { status: 200 });
 }
+
+---
+
+## Section 8 — Deployment Plan
+
+### 8.1 Prerequisites — Accounts to Create
+
+1. [Supabase](https://supabase.com) — create organisation and project
+2. [Vercel](https://vercel.com) — for Next.js web app hosting
+3. [Expo](https://expo.dev) — for EAS Build and OTA updates
+4. [Paystack](https://paystack.com) — business account, complete KYC
+5. [Termii](https://termii.com) — business account, fund SMS wallet
+6. [Twilio](https://twilio.com) — account for WhatsApp Business API
+7. [Google Cloud Console](https://console.cloud.google.com) — enable Maps JavaScript API, Places API, Geocoding API
+8. [Cloudflare](https://cloudflare.com) — add your domain, enable CDN and proxy
+
+### 8.2 Step-by-Step Setup
+
+**Step 1 — Supabase Project**
+1. Create new project: name `kajola-prod`, region `South Africa (Cape Town)` (closest to Nigeria), strong DB password
+2. Go to Settings → API → copy `Project URL` and `anon key` and `service_role key`
+3. Go to Settings → Database → enable connection pooling (PgBouncer, port 6543, transaction mode)
+4. Go to Settings → Auth → disable "Enable email confirmations"; enable "Phone provider"
+5. Under Auth → Phone: set provider to `Custom SMS`, leave template for now (we use Edge Functions for OTP)
+
+**Step 2 — Run Database Migrations**
+```bash
+npm install -g supabase
+supabase login
+supabase link --project-ref <your-project-ref>
+supabase db push  # applies supabase/migrations/20260401000000_initial.sql
+```
+
+**Step 3 — Configure pg_cron App Settings**
+In Supabase SQL editor, run:
+```sql
+ALTER DATABASE postgres SET app.edge_fn_url = 'https://<project-ref>.supabase.co/functions/v1';
+ALTER DATABASE postgres SET app.service_role_key = '<service-role-key>';
+```
+
+**Step 4 — Deploy Edge Functions**
+```bash
+supabase functions deploy auth-send-otp
+supabase functions deploy auth-verify-otp
+supabase functions deploy artisans-search
+supabase functions deploy artisans-availability
+supabase functions deploy bookings-create
+supabase functions deploy bookings-action
+supabase functions deploy payments-initiate
+supabase functions deploy webhooks-paystack
+supabase functions deploy automation-process
+supabase functions deploy admin-stats
+supabase functions deploy admin-actions
+```
+
+**Step 5 — Set Edge Function Secrets**
+```bash
+supabase secrets set PAYSTACK_SECRET_KEY=sk_live_xxxx
+supabase secrets set PAYSTACK_WEBHOOK_SECRET=xxxx
+supabase secrets set TERMII_API_KEY=xxxx
+supabase secrets set TERMII_SENDER_ID=Kajola
+supabase secrets set TWILIO_ACCOUNT_SID=ACxxxx
+supabase secrets set TWILIO_AUTH_TOKEN=xxxx
+supabase secrets set TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+supabase secrets set GOOGLE_MAPS_SERVER_KEY=xxxx
+```
+
+**Step 6 — Configure Paystack Webhooks**
+1. Log in to Paystack dashboard → Settings → API Keys & Webhooks
+2. Add webhook URL: `https://<project-ref>.supabase.co/functions/v1/webhooks-paystack`
+3. Copy the webhook secret hash key → use as `PAYSTACK_WEBHOOK_SECRET`
+
+**Step 7 — Configure Supabase Storage Buckets**
+In Supabase dashboard → Storage, create three buckets:
+- `avatars` — public read, max file size 2MB, allowed types: image/jpeg, image/png, image/webp
+- `portfolio` — public read, max file size 5MB, allowed types: image/jpeg, image/png, image/webp
+- `kyc-documents` — private (signed URLs only), max file size 10MB, allowed types: image/jpeg, application/pdf
+
+**Step 8 — Deploy Next.js to Vercel**
+```bash
+cd apps/web
+vercel --prod
+# Add all environment variables in Vercel dashboard → Settings → Environment Variables
+```
+
+**Step 9 — Build and Submit Expo App**
+```bash
+npm install -g eas-cli
+eas login
+eas build --platform android --profile production
+eas submit --platform android  # submits to Google Play Console
+```
+
+**Step 10 — Configure Realtime**
+In Supabase dashboard → Database → Replication, enable replication for table `bookings` (INSERT and UPDATE events).
+
+### 8.3 Environment Variables
+
+| Variable | Description | Source |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | Supabase → Settings → API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key | Supabase → Settings → API |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key — server only, never expose to client | Supabase → Settings → API |
+| `SUPABASE_JWT_SECRET` | JWT secret for token verification | Supabase → Settings → API |
+| `PAYSTACK_SECRET_KEY` | Paystack secret key (`sk_live_...`) | Paystack → Settings → API Keys |
+| `PAYSTACK_PUBLIC_KEY` | Paystack public key (`pk_live_...`) — safe for client | Paystack → Settings → API Keys |
+| `PAYSTACK_WEBHOOK_SECRET` | HMAC secret for webhook signature verification | Paystack → Settings → Webhooks |
+| `TERMII_API_KEY` | Termii API key | Termii → Dashboard → API Keys |
+| `TERMII_SENDER_ID` | Approved SMS sender ID (e.g. `Kajola`) | Termii → Sender ID (requires approval) |
+| `TWILIO_ACCOUNT_SID` | Twilio account SID (`ACxxxx`) | Twilio → Console → Account Info |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token | Twilio → Console → Account Info |
+| `TWILIO_WHATSAPP_FROM` | WhatsApp-enabled Twilio number (`whatsapp:+14155238886`) | Twilio → Messaging → WhatsApp |
+| `GOOGLE_MAPS_API_KEY` | Restricted browser key for Maps JS API and Places | Google Cloud → APIs & Services → Credentials |
+| `GOOGLE_MAPS_SERVER_KEY` | Unrestricted server key for Geocoding API | Google Cloud → APIs & Services → Credentials |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Same browser key, exposed to Next.js client | Same as above |
+| `EXPO_PUBLIC_SUPABASE_URL` | Supabase URL for Expo app | Same as NEXT_PUBLIC_SUPABASE_URL |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key for Expo app | Same as NEXT_PUBLIC_SUPABASE_ANON_KEY |
+| `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` | Maps key for react-native-maps (Android) | Google Cloud → Android-restricted key |
+| `SENTRY_DSN` | Sentry error tracking DSN | Sentry → Project → Settings → Client Keys |
+| `ADMIN_ALERT_PHONE` | Super admin phone for dead-job SMS alerts | Manual — set to your phone number |
+
+### 8.4 CI/CD Pipeline (GitHub Actions)
+
+```yaml
+# .github/workflows/ci.yml — runs on every push and PR
+name: CI
+on:
+  push:
+    branches: [main, claude/project-setup-bJgK8]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm run lint --workspaces
+      - run: npm run typecheck --workspaces
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm test --workspaces
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+      - run: supabase db push --project-ref ${{ secrets.STAGING_SUPABASE_REF }}
+      - run: supabase functions deploy --project-ref ${{ secrets.STAGING_SUPABASE_REF }}
+      - uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: apps/web
+
+# .github/workflows/release.yml — runs on version tags
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+      - run: supabase db push --project-ref ${{ secrets.PROD_SUPABASE_REF }}
+      - run: supabase functions deploy --project-ref ${{ secrets.PROD_SUPABASE_REF }}
+      - uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-args: --prod
+          working-directory: apps/web
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: eas build --platform android --profile production --non-interactive
+        working-directory: apps/mobile
+```
+
+### 8.5 Staging vs Production Checklist
+
+| Config | Staging | Production |
+|---|---|---|
+| Paystack keys | `sk_test_...` / `pk_test_...` | `sk_live_...` / `pk_live_...` |
+| Termii | Sandbox sender ID, test credits | Live sender ID (approved), funded wallet |
+| Twilio WhatsApp | Twilio sandbox number | Approved WhatsApp Business number |
+| Supabase project | Separate project (`kajola-staging`) | Separate project (`kajola-prod`) |
+| Vercel environment | Preview deployment | Production deployment |
+| Sentry environment | `staging` | `production` |
+| Google Maps key | No HTTP referrer restriction | Restricted to `*.kajola.ng` |
+| Database backups | Daily PITR (7 days) | Daily PITR (30 days) |
+| Error alerts | Slack #dev channel | PagerDuty + Slack #alerts |
+
+---
+
+## Section 9 — Monetization Strategy
+
+### 9.1 Revenue Model
+
+| Stream | Model | Rate | Implementation | Projected GMV Share |
+|---|---|---|---|---|
+| Transaction fee | % of booking value | 10% platform cut | Deducted at payout time from artisan earnings | Primary — ~85% of revenue |
+| Featured listing | Weekly flat fee | ₦5,000/week per artisan | `is_featured` flag + `featured_until`; renewed via Paystack payment link | ~10% of revenue |
+| Pro artisan subscription | Monthly SaaS | ₦3,500/month | Paystack recurring charge; unlocks analytics + priority ranking | ~5% of revenue |
+
+### 9.2 Transaction Fee Detail
+
+Every booking of ₦X generates:
+- Client pays: ₦X
+- Platform fee (10%): ₦X × 0.10
+- Artisan receives: ₦X × 0.90
+- Paystack processing cost: ~1.5% of ₦X (borne by platform, deducted from 10% margin)
+- **Net platform margin per transaction: ~8.5% of booking value**
+
+Example — ₦5,000 haircut:
+- Client pays: ₦5,000
+- Paystack fee (~1.5%): ₦75
+- Platform net fee: ₦500 − ₦75 = ₦425
+- Artisan payout: ₦4,500
+
+### 9.3 Revenue Projections
+
+| Monthly Bookings | Avg Booking Value | GMV | Platform Revenue (8.5%) |
+|---|---|---|---|
+| 1,000 | ₦4,500 | ₦4,500,000 | ₦382,500 |
+| 10,000 | ₦4,500 | ₦45,000,000 | ₦3,825,000 |
+| 100,000 | ₦5,000 | ₦500,000,000 | ₦42,500,000 |
+
+Featured listings (100 artisans at 10k bookings/month): +₦2,000,000/month
+Pro subscriptions (500 artisans at 100k bookings/month): +₦1,750,000/month
+
+### 9.4 Pricing Tiers (Artisan Subscriptions)
+
+| Tier | Price/month | Features | Target |
+|---|---|---|---|
+| Free | ₦0 | Up to 5 services, basic profile, standard search ranking | New artisans |
+| Pro | ₦3,500 | Unlimited services, analytics dashboard, priority ranking, verified badge | Established artisans (>20 bookings) |
+| Featured | ₦5,000/week | Pinned to top of category + homepage carousel | High-volume artisans running promotions |
+
+### 9.5 Paystack Split Configuration
+
+For Pro tier, use Paystack subaccount split:
+1. Create subaccount for each artisan via `POST https://api.paystack.co/subaccount`
+2. Store `subaccount_code` in `artisan_profiles.paystack_subaccount_code`
+3. On transaction initialize, pass `subaccount: subaccount_code` and `bearer: "account"` (platform bears Paystack fee)
+4. Paystack automatically splits: artisan gets 90%, platform gets 10% minus processing fee
+
+---
+
+## Section 10 — Scaling Plan
+
+### 10.1 0 → 10,000 Users
+
+| Action | Trigger | Implementation |
+|---|---|---|
+| Enable PgBouncer connection pooling | > 50 concurrent users | Supabase → Database → Connection Pooling → enable, port 6543, transaction mode |
+| Add GIN index on `artisan_profiles.search_vector` | Search p95 > 200ms | Already in schema; verify with `EXPLAIN ANALYZE` |
+| Enable Cloudflare CDN for artisan photos | > 500 DAU | Point Supabase Storage custom domain to Cloudflare; enable cache for `avatars/` and `portfolio/` buckets |
+| Increase Supabase compute | > 200 concurrent DB connections | Upgrade Supabase plan from Free to Pro (2GB RAM, 4 CPU) |
+| Add covering index for booking feed | Booking list p95 > 300ms | `CREATE INDEX bookings_client_feed ON bookings (client_id, status, starts_at DESC) WHERE deleted_at IS NULL` |
+| Rate limit Edge Functions | API abuse detected | Add Upstash Redis rate limiting middleware to auth functions (max 20 req/min per IP) |
+
+### 10.2 10,000 → 100,000 Users
+
+| Action | Trigger | Cost Impact |
+|---|---|---|
+| Migrate search to Typesense | FTS p95 > 500ms or search quality complaints | ~$50/month for Typesense Cloud; sync via Supabase webhook trigger |
+| Add Upstash Redis for session caching | Auth Edge Function p95 > 200ms | ~$30/month; cache JWT verification results for 5 minutes |
+| Upgrade Supabase to Large compute | DB CPU > 70% sustained | Large plan: 8GB RAM, 8 CPU, ~$200/month |
+| Enable Supabase read replica | Read:write ratio > 4:1 | Add read replica in same region; route search/list queries to replica |
+| Add pg_partitioning to `automation_jobs` | Table exceeds 5M rows | Partition by `created_at` monthly; archive partitions > 3 months old |
+| Implement Edge Function warm instances | Cold start p95 > 1s | Supabase Edge Functions → enable dedicated (always-warm) instances |
+| CDN for API responses | Search/artisan-list cache hit < 50% | Cache `GET /artisans/search` at Cloudflare edge with 60s TTL + cache key on query params |
+
+### 10.3 100,000 → 1,000,000 Users
+
+| Action | Trigger | Notes |
+|---|---|---|
+| Extract Notifications service | Notification job processing > 2 min end-to-end | Dedicated Node.js worker on Railway or Render; subscribes to Supabase Realtime for events |
+| Extract Payments service | Payment webhook queue depth > 100 | Dedicated service with its own DB connection pool; reduces contention on main DB |
+| Database horizontal read scaling | Read replica lag > 100ms | Add second read replica; implement client-side replica routing based on query type |
+| Multi-region Edge Functions | Latency > 400ms for Abuja/PH users | Deploy Edge Functions to additional regions (Supabase doesn't yet support multi-region; migrate functions to Deno Deploy or Cloudflare Workers with regional routing) |
+| Introduce message queue | Automation job throughput > 500 jobs/min | Migrate from polling pg_cron to Inngest or BullMQ on Upstash Redis for push-based job dispatch |
+| Move to dedicated Postgres | Supabase shared infrastructure limits | Migrate to self-managed Postgres on AWS RDS (af-south-1) with Supabase Auth retained; estimated $800/month for `db.r6g.xlarge` |
+
+---
+
+## Section 11 — Product Roadmap
+
+### Quarter 1 — Launch (Weeks 1–12)
+
+| Week | Milestone | Business Impact |
+|---|---|---|
+| 1–2 | Phone OTP auth (send + verify), user + artisan profile creation, Supabase DB live | Users can register; artisans can claim a profile |
+| 3–4 | Service listing CRUD, weekly availability rules, single-artisan booking creation | Artisans can be bookable; first manual test booking possible |
+| 5–6 | Paystack payment integration (initiate + webhook), booking status state machine | First real money flows through the platform |
+| 7–8 | Search (FTS + PostGIS radius), artisan discovery feed on web and mobile | Clients can find artisans without knowing their name |
+| 9–10 | SMS notifications (OTP + booking events via Termii), push notifications (Expo) | Artisans receive booking alerts; clients get confirmations |
+| 11 | Reviews + ratings, artisan wallet view, admin dashboard (stats + verification queue) | Trust signals in place; admin can onboard artisans |
+| 12 | Bug bash, performance profiling, soft launch to 50 invited artisans in Lagos | Platform goes live with real users |
+
+### Quarter 2 — Growth
+
+| Feature | Metric Target |
+|---|---|
+| Dispute management (raise, review, resolve with refund) | < 48h average resolution time; dispute rate < 2% of bookings |
+| Artisan payout to bank via Paystack Transfer | 100% of completed bookings paid out within 24h |
+| Portfolio photo uploads (up to 10 photos per artisan) | 40% of artisans upload ≥ 3 photos within 30 days of feature launch |
+| WhatsApp notifications (booking reminders, receipts) | WhatsApp delivery rate > 85% for opted-in users |
+| Referral programme (₦500 credit for referrer and referee) | Referrals account for ≥ 15% of new client signups |
+| Featured listings (₦5,000/week, self-serve checkout) | 30 featured artisans paying within first month |
+
+### Quarter 3 — Scale
+
+| Feature | Metric Target |
+|---|---|
+| Pro artisan subscription (₦3,500/month, analytics + priority ranking) | 200 paying Pro artisans by end of quarter |
+| Artisan analytics dashboard (booking trends, earnings chart, conversion rate) | Pro tier activation rate > 60% of eligible artisans |
+| Repeat booking shortcut ("Book Tunde again") | Repeat booking rate increases from 20% → 35% |
+| Expand to Abuja and Port Harcourt (geo-fenced onboarding campaigns) | 500 active artisans in each new city within 90 days |
+| In-app chat (client ↔ artisan post-booking via Supabase Realtime) | Chat reduces dispute rate by 30% |
+| Bulk availability management (artisan sets recurring monthly blocks) | Average availability setup time < 5 minutes |
+
+### Quarter 4 — Expansion
+
+| Feature | Metric Target |
+|---|---|
+| Ghana market launch (Flutterwave + GHS, Accra onboarding) | 1,000 artisans in Accra within 60 days of launch |
+| Business accounts (agencies booking multiple artisans) | 50 business accounts generating 10% of GMV |
+| Kajola API (third-party apps can embed artisan booking) | 3 integration partners signed within 90 days |
+| **Moonshot: AI-powered artisan matching** — client describes job in plain text; Kajola recommends the best 3 artisans based on reviews, availability, proximity, and specialisation | Matched booking completion rate > 80%; avg client search time < 60 seconds |
+
+---
+
+## Assumptions Made
+
+- **Stack**: Default stack applied — Next.js 14, Expo 51, Supabase (Postgres 15 + Auth + Storage + Realtime), Paystack, Termii. No stack preferences were specified.
+- **Target market**: Nigeria assumed as primary market — Paystack selected as payment provider, NGN as primary currency, amounts stored in kobo (1 NGN = 100 kobo).
+- **Auth**: Phone OTP via Termii — no email dependency anywhere in the system.
+- **Roles**: Three roles inferred from the prompt — `client`, `artisan`, and `admin/super_admin`.
+- **Multi-tenancy**: Single-tenant architecture for MVP (one `tenants` row). Schema is multi-tenant-ready (`tenant_id` on all tables, RLS with `current_user_tenant_id()`) for future SaaS expansion.
+- **Booking model**: Client pays upfront (escrow); artisan receives payout after job completion, not at booking time.
+- **Platform fee**: 10% gross, ~8.5% net after Paystack processing cost (~1.5%). Adjust in `platform_fee_kobo` calculation in `bookings-create` Edge Function.
+- **Geolocation**: PostGIS included. Remove if location-based search is not needed to reduce extension overhead.
+- **Timezone**: Africa/Lagos (WAT, UTC+1) used for cron schedules and display formatting.
+- **Payout method**: Paystack Transfer to artisan bank accounts. Artisans must complete Paystack recipient setup before first payout.
+- **Data residency**: Supabase hosted on AWS `af-south-1` (Cape Town) — closest available region to Nigeria. No in-country Nigeria hosting available via Supabase as of Q1 2026.
