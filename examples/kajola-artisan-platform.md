@@ -221,3 +221,692 @@ Nigeria has over 20 million informal-sector artisans — barbers, tailors, mecha
 6. Each dispatch attempt logged to `notification_logs` (channel, status, provider_message_id)
 7. On Termii failure: retry once after 60s, then fall back to Twilio SMS
 8. On Expo push failure (InvalidToken): remove stale push token from `users.expo_push_token`
+
+---
+
+## Section 3 — Full SQL Schema
+
+### Extensions
+
+```sql
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+CREATE EXTENSION IF NOT EXISTS "unaccent";
+CREATE EXTENSION IF NOT EXISTS "postgis";
+CREATE EXTENSION IF NOT EXISTS "pg_cron";
+CREATE EXTENSION IF NOT EXISTS "btree_gist";
+```
+
+### Enums
+
+```sql
+CREATE TYPE user_role AS ENUM ('client', 'artisan', 'admin', 'super_admin');
+
+CREATE TYPE artisan_category AS ENUM (
+  'barber', 'hairdresser', 'tailor', 'mechanic', 'electrician',
+  'plumber', 'carpenter', 'painter', 'cleaner', 'laundry',
+  'photographer', 'caterer', 'other'
+);
+
+CREATE TYPE booking_status AS ENUM (
+  'pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'disputed', 'refunded'
+);
+
+CREATE TYPE payment_status AS ENUM (
+  'pending', 'success', 'failed', 'refunded', 'partially_refunded'
+);
+
+CREATE TYPE transaction_type AS ENUM (
+  'booking_payment', 'platform_fee', 'artisan_payout', 'refund', 'referral_credit'
+);
+
+CREATE TYPE notification_channel AS ENUM ('sms', 'push', 'whatsapp', 'email');
+
+CREATE TYPE notification_status AS ENUM ('pending', 'sent', 'delivered', 'failed');
+
+CREATE TYPE job_status AS ENUM ('pending', 'running', 'completed', 'failed', 'dead');
+
+CREATE TYPE dispute_status AS ENUM ('open', 'under_review', 'resolved_client', 'resolved_artisan', 'closed');
+
+CREATE TYPE verification_status AS ENUM ('unverified', 'pending', 'verified', 'rejected');
+```
+
+### Helper Functions
+
+```sql
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION current_user_tenant_id()
+RETURNS uuid AS $$
+  SELECT (auth.jwt() ->> 'tenant_id')::uuid;
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION is_super_admin()
+RETURNS boolean AS $$
+  SELECT coalesce((auth.jwt() ->> 'role') = 'super_admin', false);
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION is_admin_or_above()
+RETURNS boolean AS $$
+  SELECT coalesce((auth.jwt() ->> 'role') IN ('admin', 'super_admin'), false);
+$$ LANGUAGE sql STABLE;
+```
+
+### Core Tables
+
+```sql
+-- ─── tenants ───────────────────────────────────────────────────────────────
+CREATE TABLE tenants (
+  id           uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name         text NOT NULL,
+  slug         text NOT NULL UNIQUE,
+  plan         text NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'pro', 'enterprise')),
+  is_active    boolean NOT NULL DEFAULT true,
+  settings     jsonb NOT NULL DEFAULT '{}',
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_tenants_updated_at
+  BEFORE UPDATE ON tenants
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ─── users ─────────────────────────────────────────────────────────────────
+-- Extends auth.users — one row per Supabase auth user
+CREATE TABLE users (
+  id                  uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  tenant_id           uuid NOT NULL REFERENCES tenants(id),
+  phone               text NOT NULL UNIQUE,
+  role                user_role NOT NULL DEFAULT 'client',
+  full_name           text,
+  avatar_url          text,
+  expo_push_token     text,
+  whatsapp_opted_in   boolean NOT NULL DEFAULT false,
+  referral_code       text NOT NULL UNIQUE DEFAULT substr(md5(random()::text), 1, 8),
+  referred_by         uuid REFERENCES users(id),
+  is_active           boolean NOT NULL DEFAULT true,
+  last_seen_at        timestamptz,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_users_updated_at
+  BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX users_tenant_idx ON users (tenant_id);
+CREATE INDEX users_phone_idx ON users (phone);
+CREATE INDEX users_referral_code_idx ON users (referral_code);
+
+-- ─── artisan_profiles ──────────────────────────────────────────────────────
+CREATE TABLE artisan_profiles (
+  id                        uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id                   uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  tenant_id                 uuid NOT NULL REFERENCES tenants(id),
+  category                  artisan_category NOT NULL,
+  bio                       text,
+  years_experience          smallint NOT NULL DEFAULT 0 CHECK (years_experience >= 0),
+  base_rate_kobo            bigint NOT NULL CHECK (base_rate_kobo > 0),
+  location_text             text NOT NULL,
+  location                  geography(POINT, 4326),
+  service_radius_km         smallint NOT NULL DEFAULT 10 CHECK (service_radius_km > 0),
+  verification_status       verification_status NOT NULL DEFAULT 'unverified',
+  is_featured               boolean NOT NULL DEFAULT false,
+  featured_until            timestamptz,
+  average_rating            numeric(3,2) NOT NULL DEFAULT 0 CHECK (average_rating BETWEEN 0 AND 5),
+  total_reviews             integer NOT NULL DEFAULT 0,
+  total_completed_bookings  integer NOT NULL DEFAULT 0,
+  paystack_recipient_code   text,
+  paystack_subaccount_code  text,
+  search_vector             tsvector,
+  deleted_at                timestamptz,
+  created_at                timestamptz NOT NULL DEFAULT now(),
+  updated_at                timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_artisan_profiles_updated_at
+  BEFORE UPDATE ON artisan_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX artisan_profiles_tenant_idx ON artisan_profiles (tenant_id) WHERE deleted_at IS NULL;
+CREATE INDEX artisan_profiles_category_idx ON artisan_profiles (tenant_id, category) WHERE deleted_at IS NULL;
+CREATE INDEX artisan_profiles_location_idx ON artisan_profiles USING GIST (location) WHERE deleted_at IS NULL;
+CREATE INDEX artisan_profiles_featured_idx ON artisan_profiles (is_featured, featured_until) WHERE deleted_at IS NULL;
+CREATE INDEX artisan_profiles_search_idx ON artisan_profiles USING GIN (search_vector);
+CREATE INDEX artisan_profiles_user_idx ON artisan_profiles (user_id);
+
+CREATE OR REPLACE FUNCTION update_artisan_search_vector()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.search_vector := to_tsvector('english',
+    coalesce(NEW.bio, '') || ' ' ||
+    coalesce(NEW.location_text, '') || ' ' ||
+    coalesce(NEW.category::text, '')
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER artisan_search_vector_update
+  BEFORE INSERT OR UPDATE ON artisan_profiles
+  FOR EACH ROW EXECUTE FUNCTION update_artisan_search_vector();
+
+-- ─── client_profiles ───────────────────────────────────────────────────────
+CREATE TABLE client_profiles (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id         uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  home_address    text,
+  home_location   geography(POINT, 4326),
+  wallet_credit_kobo bigint NOT NULL DEFAULT 0 CHECK (wallet_credit_kobo >= 0),
+  deleted_at      timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_client_profiles_updated_at
+  BEFORE UPDATE ON client_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX client_profiles_user_idx ON client_profiles (user_id);
+CREATE INDEX client_profiles_tenant_idx ON client_profiles (tenant_id) WHERE deleted_at IS NULL;
+```
+
+### Domain Tables
+
+```sql
+-- ─── services ──────────────────────────────────────────────────────────────
+CREATE TABLE services (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  artisan_id      uuid NOT NULL REFERENCES artisan_profiles(id) ON DELETE CASCADE,
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  name            text NOT NULL,
+  description     text,
+  price_kobo      bigint NOT NULL CHECK (price_kobo > 0),
+  duration_minutes smallint NOT NULL CHECK (duration_minutes > 0),
+  is_active       boolean NOT NULL DEFAULT true,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_services_updated_at
+  BEFORE UPDATE ON services FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX services_artisan_idx ON services (artisan_id) WHERE is_active = true;
+CREATE INDEX services_tenant_idx ON services (tenant_id);
+
+-- ─── availability_rules ────────────────────────────────────────────────────
+-- Weekly recurring availability (e.g. Mon–Fri 9am–6pm)
+CREATE TABLE availability_rules (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  artisan_id      uuid NOT NULL REFERENCES artisan_profiles(id) ON DELETE CASCADE,
+  day_of_week     smallint NOT NULL CHECK (day_of_week BETWEEN 0 AND 6), -- 0=Sunday
+  start_time      time NOT NULL,
+  end_time        time NOT NULL CHECK (end_time > start_time),
+  is_active       boolean NOT NULL DEFAULT true,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT availability_rules_artisan_day_unique UNIQUE (artisan_id, day_of_week)
+);
+
+CREATE TRIGGER set_availability_rules_updated_at
+  BEFORE UPDATE ON availability_rules FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX availability_rules_artisan_idx ON availability_rules (artisan_id) WHERE is_active = true;
+
+-- ─── availability_blocks ───────────────────────────────────────────────────
+-- One-off unavailability (holiday, sick day)
+CREATE TABLE availability_blocks (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  artisan_id      uuid NOT NULL REFERENCES artisan_profiles(id) ON DELETE CASCADE,
+  starts_at       timestamptz NOT NULL,
+  ends_at         timestamptz NOT NULL CHECK (ends_at > starts_at),
+  reason          text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX availability_blocks_artisan_time_idx ON availability_blocks (artisan_id, starts_at, ends_at);
+
+-- ─── bookings ──────────────────────────────────────────────────────────────
+CREATE TABLE bookings (
+  id                  uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id           uuid NOT NULL REFERENCES tenants(id),
+  client_id           uuid NOT NULL REFERENCES users(id),
+  artisan_id          uuid NOT NULL REFERENCES artisan_profiles(id),
+  service_id          uuid NOT NULL REFERENCES services(id),
+  status              booking_status NOT NULL DEFAULT 'pending',
+  starts_at           timestamptz NOT NULL,
+  ends_at             timestamptz NOT NULL CHECK (ends_at > starts_at),
+  address_text        text NOT NULL,
+  address_location    geography(POINT, 4326),
+  price_kobo          bigint NOT NULL CHECK (price_kobo > 0),
+  platform_fee_kobo   bigint NOT NULL CHECK (platform_fee_kobo >= 0),
+  artisan_payout_kobo bigint NOT NULL CHECK (artisan_payout_kobo > 0),
+  client_note         text,
+  cancellation_reason text,
+  cancelled_by        uuid REFERENCES users(id),
+  completed_at        timestamptz,
+  disputed_at         timestamptz,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now(),
+  -- Prevent double-booking at DB level
+  CONSTRAINT no_double_booking EXCLUDE USING gist (
+    artisan_id WITH =,
+    tstzrange(starts_at, ends_at, '[)') WITH &&
+  ) WHERE (status NOT IN ('cancelled', 'refunded'))
+);
+
+CREATE TRIGGER set_bookings_updated_at
+  BEFORE UPDATE ON bookings FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX bookings_tenant_idx ON bookings (tenant_id, created_at DESC);
+CREATE INDEX bookings_client_idx ON bookings (client_id, created_at DESC);
+CREATE INDEX bookings_artisan_idx ON bookings (artisan_id, starts_at);
+CREATE INDEX bookings_status_idx ON bookings (status, created_at DESC) WHERE status IN ('pending','confirmed','in_progress');
+
+-- ─── reviews ───────────────────────────────────────────────────────────────
+CREATE TABLE reviews (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  booking_id      uuid NOT NULL UNIQUE REFERENCES bookings(id),
+  client_id       uuid NOT NULL REFERENCES users(id),
+  artisan_id      uuid NOT NULL REFERENCES artisan_profiles(id),
+  rating          smallint NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment         text,
+  is_visible      boolean NOT NULL DEFAULT true,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_reviews_updated_at
+  BEFORE UPDATE ON reviews FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX reviews_artisan_idx ON reviews (artisan_id, created_at DESC) WHERE is_visible = true;
+CREATE INDEX reviews_client_idx ON reviews (client_id);
+
+-- Auto-update artisan average rating after review insert/update
+CREATE OR REPLACE FUNCTION refresh_artisan_rating()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE artisan_profiles SET
+    average_rating = (
+      SELECT ROUND(AVG(rating)::numeric, 2) FROM reviews
+      WHERE artisan_id = NEW.artisan_id AND is_visible = true
+    ),
+    total_reviews = (
+      SELECT COUNT(*) FROM reviews
+      WHERE artisan_id = NEW.artisan_id AND is_visible = true
+    )
+  WHERE id = NEW.artisan_id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_artisan_rating
+  AFTER INSERT OR UPDATE ON reviews
+  FOR EACH ROW EXECUTE FUNCTION refresh_artisan_rating();
+
+-- ─── disputes ──────────────────────────────────────────────────────────────
+CREATE TABLE disputes (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  booking_id      uuid NOT NULL UNIQUE REFERENCES bookings(id),
+  raised_by       uuid NOT NULL REFERENCES users(id),
+  status          dispute_status NOT NULL DEFAULT 'open',
+  reason          text NOT NULL,
+  evidence_urls   text[] NOT NULL DEFAULT '{}',
+  resolution_note text,
+  resolved_by     uuid REFERENCES users(id),
+  resolved_at     timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_disputes_updated_at
+  BEFORE UPDATE ON disputes FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX disputes_tenant_status_idx ON disputes (tenant_id, status, created_at DESC);
+CREATE INDEX disputes_booking_idx ON disputes (booking_id);
+
+-- ─── portfolio_photos ──────────────────────────────────────────────────────
+CREATE TABLE portfolio_photos (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  artisan_id      uuid NOT NULL REFERENCES artisan_profiles(id) ON DELETE CASCADE,
+  storage_path    text NOT NULL,
+  caption         text,
+  sort_order      smallint NOT NULL DEFAULT 0,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX portfolio_photos_artisan_idx ON portfolio_photos (artisan_id, sort_order);
+```
+
+### Payment Tables
+
+```sql
+-- ─── transactions ──────────────────────────────────────────────────────────
+CREATE TABLE transactions (
+  id                  uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id           uuid NOT NULL REFERENCES tenants(id),
+  booking_id          uuid REFERENCES bookings(id),
+  type                transaction_type NOT NULL,
+  status              payment_status NOT NULL DEFAULT 'pending',
+  amount_kobo         bigint NOT NULL CHECK (amount_kobo > 0),
+  currency            text NOT NULL DEFAULT 'NGN',
+  paystack_reference  text UNIQUE,
+  paystack_access_code text,
+  provider_response   jsonb,
+  initiated_by        uuid NOT NULL REFERENCES users(id),
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_transactions_updated_at
+  BEFORE UPDATE ON transactions FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX transactions_tenant_idx ON transactions (tenant_id, created_at DESC);
+CREATE INDEX transactions_booking_idx ON transactions (booking_id);
+CREATE INDEX transactions_status_idx ON transactions (status) WHERE status = 'pending';
+CREATE INDEX transactions_paystack_ref_idx ON transactions (paystack_reference);
+
+-- ─── wallets ───────────────────────────────────────────────────────────────
+CREATE TABLE wallets (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id         uuid NOT NULL UNIQUE REFERENCES users(id),
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  balance_kobo    bigint NOT NULL DEFAULT 0 CHECK (balance_kobo >= 0),
+  currency        text NOT NULL DEFAULT 'NGN',
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_wallets_updated_at
+  BEFORE UPDATE ON wallets FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX wallets_tenant_idx ON wallets (tenant_id);
+
+-- ─── wallet_transactions ───────────────────────────────────────────────────
+CREATE TABLE wallet_transactions (
+  id                  uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  wallet_id           uuid NOT NULL REFERENCES wallets(id),
+  type                text NOT NULL CHECK (type IN ('credit', 'debit')),
+  amount_kobo         bigint NOT NULL CHECK (amount_kobo > 0),
+  balance_after_kobo  bigint NOT NULL,
+  reference           text NOT NULL UNIQUE,
+  description         text NOT NULL,
+  booking_id          uuid REFERENCES bookings(id),
+  metadata            jsonb NOT NULL DEFAULT '{}',
+  created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX wallet_transactions_wallet_idx ON wallet_transactions (wallet_id, created_at DESC);
+CREATE INDEX wallet_transactions_booking_idx ON wallet_transactions (booking_id);
+
+-- ─── webhook_logs ──────────────────────────────────────────────────────────
+CREATE TABLE webhook_logs (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  provider        text NOT NULL CHECK (provider IN ('paystack', 'flutterwave', 'termii', 'twilio')),
+  event_type      text NOT NULL,
+  payload         jsonb NOT NULL,
+  idempotency_key text NOT NULL UNIQUE,
+  processed       boolean NOT NULL DEFAULT false,
+  processed_at    timestamptz,
+  error           text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX webhook_logs_provider_idx ON webhook_logs (provider, created_at DESC);
+CREATE INDEX webhook_logs_unprocessed_idx ON webhook_logs (processed, created_at) WHERE processed = false;
+```
+
+### Automation Tables
+
+```sql
+-- ─── automation_jobs ───────────────────────────────────────────────────────
+CREATE TABLE automation_jobs (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  job_type        text NOT NULL,
+  payload         jsonb NOT NULL DEFAULT '{}',
+  status          job_status NOT NULL DEFAULT 'pending',
+  idempotency_key text UNIQUE,
+  attempts        integer NOT NULL DEFAULT 0,
+  max_attempts    integer NOT NULL DEFAULT 3,
+  next_run_at     timestamptz NOT NULL DEFAULT now(),
+  last_error      text,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_automation_jobs_updated_at
+  BEFORE UPDATE ON automation_jobs FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX automation_jobs_pending_idx ON automation_jobs (next_run_at) WHERE status = 'pending';
+CREATE INDEX automation_jobs_type_idx ON automation_jobs (job_type, status);
+
+-- ─── notification_logs ─────────────────────────────────────────────────────
+CREATE TABLE notification_logs (
+  id                  uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id             uuid NOT NULL REFERENCES users(id),
+  channel             notification_channel NOT NULL,
+  status              notification_status NOT NULL DEFAULT 'pending',
+  template            text NOT NULL,
+  content             text NOT NULL,
+  provider_message_id text,
+  booking_id          uuid REFERENCES bookings(id),
+  error               text,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_notification_logs_updated_at
+  BEFORE UPDATE ON notification_logs FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX notification_logs_user_idx ON notification_logs (user_id, created_at DESC);
+CREATE INDEX notification_logs_booking_idx ON notification_logs (booking_id);
+
+-- ─── phone_otps ────────────────────────────────────────────────────────────
+CREATE TABLE phone_otps (
+  id          uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  phone       text NOT NULL,
+  otp_hash    text NOT NULL,
+  expires_at  timestamptz NOT NULL DEFAULT (now() + interval '10 minutes'),
+  verified_at timestamptz,
+  attempts    integer NOT NULL DEFAULT 0,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX phone_otps_phone_idx ON phone_otps (phone, created_at DESC);
+CREATE INDEX phone_otps_expired_idx ON phone_otps (expires_at) WHERE verified_at IS NULL;
+
+-- ─── audit_logs ────────────────────────────────────────────────────────────
+CREATE TABLE audit_logs (
+  id          uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id   uuid REFERENCES tenants(id),
+  user_id     uuid REFERENCES users(id),
+  action      text NOT NULL,
+  entity_type text NOT NULL,
+  entity_id   uuid NOT NULL,
+  old_data    jsonb,
+  new_data    jsonb,
+  ip_address  inet,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX audit_logs_entity_idx ON audit_logs (entity_type, entity_id);
+CREATE INDEX audit_logs_tenant_idx ON audit_logs (tenant_id, created_at DESC);
+CREATE INDEX audit_logs_user_idx ON audit_logs (user_id, created_at DESC);
+```
+
+### RLS Policies
+
+```sql
+-- ─── tenants ───────────────────────────────────────────────────────────────
+ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenants_super_admin_all" ON tenants USING (is_super_admin());
+
+-- ─── users ─────────────────────────────────────────────────────────────────
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users_tenant_select" ON users FOR SELECT
+  USING (tenant_id = current_user_tenant_id() OR is_super_admin());
+CREATE POLICY "users_own_update" ON users FOR UPDATE
+  USING (id = auth.uid() OR is_admin_or_above());
+
+-- ─── artisan_profiles ──────────────────────────────────────────────────────
+ALTER TABLE artisan_profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "artisan_profiles_public_select" ON artisan_profiles FOR SELECT
+  USING (deleted_at IS NULL);
+CREATE POLICY "artisan_profiles_own_insert" ON artisan_profiles FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+CREATE POLICY "artisan_profiles_own_update" ON artisan_profiles FOR UPDATE
+  USING (user_id = auth.uid() OR is_admin_or_above());
+
+-- ─── client_profiles ───────────────────────────────────────────────────────
+ALTER TABLE client_profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "client_profiles_own_select" ON client_profiles FOR SELECT
+  USING (user_id = auth.uid() OR is_admin_or_above());
+CREATE POLICY "client_profiles_own_insert" ON client_profiles FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+CREATE POLICY "client_profiles_own_update" ON client_profiles FOR UPDATE
+  USING (user_id = auth.uid() OR is_admin_or_above());
+
+-- ─── services ──────────────────────────────────────────────────────────────
+ALTER TABLE services ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "services_public_select" ON services FOR SELECT USING (is_active = true);
+CREATE POLICY "services_artisan_insert" ON services FOR INSERT
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM artisan_profiles WHERE id = artisan_id AND user_id = auth.uid()
+  ));
+CREATE POLICY "services_artisan_update" ON services FOR UPDATE
+  USING (EXISTS (
+    SELECT 1 FROM artisan_profiles WHERE id = artisan_id AND user_id = auth.uid()
+  ) OR is_admin_or_above());
+
+-- ─── availability_rules ────────────────────────────────────────────────────
+ALTER TABLE availability_rules ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "availability_rules_public_select" ON availability_rules FOR SELECT USING (true);
+CREATE POLICY "availability_rules_artisan_write" ON availability_rules FOR ALL
+  USING (EXISTS (
+    SELECT 1 FROM artisan_profiles WHERE id = artisan_id AND user_id = auth.uid()
+  ));
+
+-- ─── availability_blocks ───────────────────────────────────────────────────
+ALTER TABLE availability_blocks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "availability_blocks_public_select" ON availability_blocks FOR SELECT USING (true);
+CREATE POLICY "availability_blocks_artisan_write" ON availability_blocks FOR ALL
+  USING (EXISTS (
+    SELECT 1 FROM artisan_profiles WHERE id = artisan_id AND user_id = auth.uid()
+  ));
+
+-- ─── bookings ──────────────────────────────────────────────────────────────
+ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "bookings_participant_select" ON bookings FOR SELECT
+  USING (
+    client_id = auth.uid() OR
+    EXISTS (SELECT 1 FROM artisan_profiles WHERE id = artisan_id AND user_id = auth.uid()) OR
+    is_admin_or_above()
+  );
+CREATE POLICY "bookings_client_insert" ON bookings FOR INSERT
+  WITH CHECK (client_id = auth.uid());
+CREATE POLICY "bookings_participant_update" ON bookings FOR UPDATE
+  USING (
+    client_id = auth.uid() OR
+    EXISTS (SELECT 1 FROM artisan_profiles WHERE id = artisan_id AND user_id = auth.uid()) OR
+    is_admin_or_above()
+  );
+
+-- ─── reviews ───────────────────────────────────────────────────────────────
+ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "reviews_public_select" ON reviews FOR SELECT USING (is_visible = true);
+CREATE POLICY "reviews_client_insert" ON reviews FOR INSERT
+  WITH CHECK (
+    client_id = auth.uid() AND
+    EXISTS (SELECT 1 FROM bookings WHERE id = booking_id AND client_id = auth.uid() AND status = 'completed')
+  );
+CREATE POLICY "reviews_admin_update" ON reviews FOR UPDATE USING (is_admin_or_above());
+
+-- ─── transactions ──────────────────────────────────────────────────────────
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "transactions_participant_select" ON transactions FOR SELECT
+  USING (initiated_by = auth.uid() OR is_admin_or_above());
+
+-- ─── wallets ───────────────────────────────────────────────────────────────
+ALTER TABLE wallets ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "wallets_own_select" ON wallets FOR SELECT
+  USING (user_id = auth.uid() OR is_admin_or_above());
+
+-- ─── wallet_transactions ───────────────────────────────────────────────────
+ALTER TABLE wallet_transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "wallet_transactions_own_select" ON wallet_transactions FOR SELECT
+  USING (EXISTS (SELECT 1 FROM wallets WHERE id = wallet_id AND user_id = auth.uid()) OR is_admin_or_above());
+
+-- ─── disputes ──────────────────────────────────────────────────────────────
+ALTER TABLE disputes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "disputes_participant_select" ON disputes FOR SELECT
+  USING (raised_by = auth.uid() OR is_admin_or_above());
+CREATE POLICY "disputes_participant_insert" ON disputes FOR INSERT
+  WITH CHECK (raised_by = auth.uid());
+CREATE POLICY "disputes_admin_update" ON disputes FOR UPDATE USING (is_admin_or_above());
+
+-- ─── portfolio_photos ──────────────────────────────────────────────────────
+ALTER TABLE portfolio_photos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "portfolio_photos_public_select" ON portfolio_photos FOR SELECT USING (true);
+CREATE POLICY "portfolio_photos_artisan_write" ON portfolio_photos FOR ALL
+  USING (EXISTS (
+    SELECT 1 FROM artisan_profiles WHERE id = artisan_id AND user_id = auth.uid()
+  ));
+
+-- ─── automation_jobs, notification_logs, webhook_logs, audit_logs, phone_otps
+-- All managed exclusively by service role (Edge Functions). No client access.
+ALTER TABLE automation_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE phone_otps ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "automation_jobs_admin_select" ON automation_jobs FOR SELECT USING (is_admin_or_above());
+CREATE POLICY "notification_logs_admin_select" ON notification_logs FOR SELECT USING (is_admin_or_above());
+CREATE POLICY "audit_logs_admin_select" ON audit_logs FOR SELECT USING (is_admin_or_above());
+```
+
+### Scheduled Cleanup Jobs
+
+```sql
+-- Clean up expired OTPs daily at 03:00 WAT
+SELECT cron.schedule('cleanup-expired-otps', '0 2 * * *',
+  $$ DELETE FROM phone_otps WHERE expires_at < now() - interval '1 day'; $$
+);
+
+-- Clean up old processed webhook logs after 30 days
+SELECT cron.schedule('cleanup-webhook-logs', '0 3 * * *',
+  $$ DELETE FROM webhook_logs WHERE processed = true AND created_at < now() - interval '30 days'; $$
+);
+
+-- Process pending automation jobs every minute
+SELECT cron.schedule('process-automation-jobs', '* * * * *',
+  $$ SELECT net.http_post(
+    url := current_setting('app.edge_function_base_url') || '/automation/process',
+    headers := jsonb_build_object('Authorization', 'Bearer ' || current_setting('app.service_role_key')),
+    body := '{}'::jsonb
+  ); $$
+);
+```
+
+### Seed Data
+
+```sql
+-- Default tenant
+INSERT INTO tenants (id, name, slug, plan)
+VALUES ('00000000-0000-0000-0000-000000000001', 'Kajola', 'kajola', 'enterprise');
+
+-- Artisan categories reference (for client-side display labels)
+-- Stored as enum above; this is the display label mapping kept in app constants, not a DB table.
+
+-- Super admin user (replace UUIDs and phone after first deployment)
+-- Step 1: create via Supabase Auth dashboard or CLI
+-- Step 2: insert users row:
+-- INSERT INTO users (id, tenant_id, phone, role, full_name)
+-- VALUES ('<auth.users.id>', '00000000-0000-0000-0000-000000000001', '+2348000000000', 'super_admin', 'Kajola Admin');
+```
