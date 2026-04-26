@@ -1723,3 +1723,314 @@ export async function handlePaystackWebhook(req: Request): Promise<Response> {
 
   return new Response(JSON.stringify({ received: true }), { status: 200 });
 }
+
+---
+
+## Section 8 — Deployment Plan
+
+### 8.1 Prerequisites
+
+1. [Supabase](https://supabase.com) — create organisation and project
+2. [Vercel](https://vercel.com) — Next.js hosting
+3. [Expo](https://expo.dev) — EAS Build and OTA updates
+4. [Paystack](https://paystack.com) — business account with completed KYC
+5. [Termii](https://termii.com) — business account, funded SMS wallet, approved sender ID `ToolHire`
+6. [Twilio](https://twilio.com) — WhatsApp Business API access
+7. [Google Cloud Console](https://console.cloud.google.com) — enable Maps JavaScript API, Places API, Geocoding API
+8. [Cloudflare](https://cloudflare.com) — domain proxy and CDN
+
+### 8.2 Step-by-Step Setup
+
+**Step 1 — Supabase Project**
+1. New project: name `toolhire-prod`, region `South Africa (Cape Town)`, strong DB password
+2. Settings → API: copy Project URL, anon key, service_role key
+3. Settings → Database → Connection Pooling: enable PgBouncer, port 6543, transaction mode
+4. Settings → Auth → disable email confirmations; leave phone provider on Custom (we use Edge Functions)
+
+**Step 2 — Run Migrations**
+```bash
+supabase login
+supabase link --project-ref <your-project-ref>
+supabase db push
+```
+
+**Step 3 — Configure pg_cron App Settings**
+```sql
+ALTER DATABASE postgres SET app.edge_fn_url = 'https://<project-ref>.supabase.co/functions/v1';
+ALTER DATABASE postgres SET app.service_role_key = '<service-role-key>';
+```
+
+**Step 4 — Deploy Edge Functions**
+```bash
+supabase functions deploy auth-send-otp
+supabase functions deploy auth-verify-otp
+supabase functions deploy equipment-search
+supabase functions deploy equipment-availability
+supabase functions deploy rentals-create
+supabase functions deploy rentals-action
+supabase functions deploy payments-initiate
+supabase functions deploy payments-release-deposit
+supabase functions deploy webhooks-paystack
+supabase functions deploy automation-process
+supabase functions deploy admin-stats
+supabase functions deploy admin-actions
+```
+
+**Step 5 — Set Edge Function Secrets**
+```bash
+supabase secrets set PAYSTACK_SECRET_KEY=sk_live_xxxx
+supabase secrets set PAYSTACK_WEBHOOK_SECRET=xxxx
+supabase secrets set TERMII_API_KEY=xxxx
+supabase secrets set TERMII_SENDER_ID=ToolHire
+supabase secrets set TWILIO_ACCOUNT_SID=ACxxxx
+supabase secrets set TWILIO_AUTH_TOKEN=xxxx
+supabase secrets set TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+supabase secrets set GOOGLE_MAPS_SERVER_KEY=xxxx
+supabase secrets set ADMIN_ALERT_PHONE=+2348000000001
+```
+
+**Step 6 — Configure Paystack Webhooks**
+1. Paystack dashboard → Settings → API Keys & Webhooks
+2. Webhook URL: `https://<project-ref>.supabase.co/functions/v1/webhooks-paystack`
+3. Copy webhook secret hash → set as `PAYSTACK_WEBHOOK_SECRET`
+
+**Step 7 — Supabase Storage Buckets**
+- `equipment-photos` — public, max 5MB, image/jpeg + image/png + image/webp
+- `condition-photos` — private (signed URLs, 2h expiry), max 5MB, image/jpeg + image/png + image/webp
+- `ownership-docs` — private (signed URLs, 1h expiry), max 10MB, image/jpeg + application/pdf
+
+**Step 8 — Enable Realtime**
+Database → Replication: enable INSERT and UPDATE events for `rentals` table.
+
+**Step 9 — Deploy to Vercel**
+```bash
+cd apps/web && vercel --prod
+# Add all env vars in Vercel → Settings → Environment Variables
+```
+
+**Step 10 — Build Expo App**
+```bash
+eas build --platform android --profile production
+eas submit --platform android
+```
+
+### 8.3 Environment Variables
+
+| Variable | Description | Source |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | Supabase → Settings → API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key | Supabase → Settings → API |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key — server only | Supabase → Settings → API |
+| `SUPABASE_JWT_SECRET` | JWT secret for token verification | Supabase → Settings → API |
+| `PAYSTACK_SECRET_KEY` | Paystack secret key (`sk_live_...`) | Paystack → Settings → API Keys |
+| `PAYSTACK_PUBLIC_KEY` | Paystack public key (`pk_live_...`) | Paystack → Settings → API Keys |
+| `PAYSTACK_WEBHOOK_SECRET` | HMAC webhook signature secret | Paystack → Settings → Webhooks |
+| `TERMII_API_KEY` | Termii API key | Termii → Dashboard → API Keys |
+| `TERMII_SENDER_ID` | Approved sender ID: `ToolHire` | Termii → Sender ID (requires 24–48h approval) |
+| `TWILIO_ACCOUNT_SID` | Twilio account SID | Twilio → Console → Account Info |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token | Twilio → Console → Account Info |
+| `TWILIO_WHATSAPP_FROM` | WhatsApp-enabled number | Twilio → Messaging → WhatsApp Sandbox |
+| `GOOGLE_MAPS_API_KEY` | Browser-restricted key | Google Cloud → APIs & Services → Credentials |
+| `GOOGLE_MAPS_SERVER_KEY` | Server key for Geocoding | Google Cloud → APIs & Services → Credentials |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Same browser key for Next.js client | Same as above |
+| `EXPO_PUBLIC_SUPABASE_URL` | Supabase URL for Expo | Same as NEXT_PUBLIC_SUPABASE_URL |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key for Expo | Same as NEXT_PUBLIC_SUPABASE_ANON_KEY |
+| `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` | Android-restricted Maps key | Google Cloud → Android key restriction |
+| `SENTRY_DSN` | Error tracking DSN | Sentry → Project → Settings → Client Keys |
+| `ADMIN_ALERT_PHONE` | Super admin phone for dead-job alerts | Manual — your phone number |
+
+### 8.4 CI/CD Pipeline
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm run lint --workspaces
+      - run: npm run typecheck --workspaces
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+      - run: supabase db push --project-ref ${{ secrets.STAGING_SUPABASE_REF }}
+      - run: supabase functions deploy --project-ref ${{ secrets.STAGING_SUPABASE_REF }}
+      - uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: apps/web
+```
+
+### 8.5 Staging vs Production
+
+| Config | Staging | Production |
+|---|---|---|
+| Paystack keys | `sk_test_...` / `pk_test_...` | `sk_live_...` / `pk_live_...` |
+| Termii sender ID | Sandbox | `ToolHire` (approved) |
+| Supabase | `toolhire-staging` project | `toolhire-prod` project |
+| Storage buckets | Same names, separate project | Same names, production project |
+| Google Maps key | Unrestricted (dev only) | HTTP referrer restricted to `*.toolhirepro.ng` |
+| Sentry | `staging` environment | `production` environment |
+
+---
+
+## Section 9 — Monetization Strategy
+
+### 9.1 Revenue Model
+
+| Stream | Model | Rate | Implementation | Revenue Share |
+|---|---|---|---|---|
+| Transaction fee | % of rental value (excl. deposit) | 10% platform cut | Deducted at payout from owner earnings | ~80% of revenue |
+| Featured listing | Weekly flat fee | ₦8,000/week per listing | `is_featured` + `featured_until`; renewed via Paystack link | ~12% of revenue |
+| Pro owner subscription | Monthly SaaS | ₦5,000/month | Paystack recurring; unlocks fleet dashboard + analytics | ~8% of revenue |
+
+### 9.2 Transaction Fee Detail
+
+Every completed rental of ₦X (excluding deposit):
+- Platform fee (10%): ₦X × 0.10
+- Paystack processing (~1.5%): ₦X × 0.015
+- Net platform margin: ~8.5% of rental value
+
+Example — 7-day generator rental at ₦5,000/day = ₦35,000:
+- Delivery fee: ₦5,000 (passed through to owner at 100%)
+- Rental platform fee: ₦3,500
+- Paystack processing: ₦525
+- Net platform margin: ₦2,975 per rental
+- Owner payout: ₦31,500 rental + ₦5,000 delivery = ₦36,500
+
+### 9.3 Revenue Projections
+
+| Monthly Rentals | Avg Rental Value | Rental GMV | Platform Revenue (8.5%) |
+|---|---|---|---|
+| 500 | ₦30,000 | ₦15,000,000 | ₦1,275,000 |
+| 2,000 | ₦35,000 | ₦70,000,000 | ₦5,950,000 |
+| 10,000 | ₦40,000 | ₦400,000,000 | ₦34,000,000 |
+
+Featured listings (50 at 2k rentals/month): +₦1,600,000/month
+Pro subscriptions (200 owners at 10k rentals/month): +₦1,000,000/month
+
+### 9.4 Pricing Tiers
+
+| Tier | Price/month | Features | Target |
+|---|---|---|---|
+| Free | ₦0 | Up to 3 listings, basic analytics, standard ranking | New owners |
+| Pro | ₦5,000 | Unlimited listings, fleet dashboard, priority ranking, verified badge, PDF rental agreements | Fleet owners (5+ machines) |
+| Featured | ₦8,000/week/listing | Top of category search + homepage carousel | High-revenue listings |
+
+### 9.5 Deposit Revenue Note
+
+ToolHire Pro does not retain deposit funds. Deposits flow Renter → Paystack hold → return to Renter (or partial to Owner). Any dispute resolution fee (₦2,000 flat admin fee charged to the losing party) is a minor additional revenue line added in Q3.
+
+---
+
+## Section 10 — Scaling Plan
+
+### 10.1 0 → 5,000 Users
+
+| Action | Trigger | Implementation |
+|---|---|---|
+| Enable PgBouncer | > 50 concurrent users | Supabase → Database → Connection Pooling → port 6543, transaction mode |
+| Add GIN index on `equipment.search_vector` | Search p95 > 200ms | Already in schema; verify with `EXPLAIN ANALYZE` |
+| Cloudflare CDN for equipment photos | > 200 DAU | Supabase Storage custom domain → Cloudflare; cache `equipment-photos/` bucket |
+| Rate limit OTP Edge Functions | Abuse or cost spike | Upstash Redis rate limiting: max 3 OTPs/phone/10min, max 20 req/min/IP |
+| Upgrade Supabase to Pro | > 150 concurrent DB connections | Pro plan: 2GB RAM, dedicated compute |
+
+### 10.2 5,000 → 50,000 Users
+
+| Action | Trigger | Notes |
+|---|---|---|
+| Migrate to Typesense for equipment search | FTS p95 > 400ms | Typesense Cloud ~$50/month; sync via Supabase webhook + pg_cron |
+| Upstash Redis for JWT caching | Auth Edge Function p95 > 200ms | Cache user role lookups for 5 minutes per JWT |
+| Supabase Large compute | DB CPU sustained > 70% | 8GB RAM, 8 CPU; ~$200/month |
+| Add read replica | Read:write ratio > 4:1 | Route equipment search and listing queries to replica |
+| Condition photo CDN pre-signing | Signed URL generation > 100ms | Pre-generate signed URLs on rental confirmation; cache in Redis for 2h |
+
+### 10.3 50,000 → 500,000 Users
+
+| Action | Trigger | Notes |
+|---|---|---|
+| Extract Condition Verification service | Photo processing > 5s end-to-end | Dedicated worker with image comparison hashing (pHash) to flag potential disputes automatically |
+| Dedicated Paystack integration service | Webhook queue depth > 200 | Isolated service with own DB pool; eliminates payment-related contention on main DB |
+| Multi-city infrastructure | Latency > 400ms for Abuja/PH users | Edge Functions on Cloudflare Workers with regional routing; Supabase read replica in eu-west (closer to northern Nigeria) |
+| Introduce Inngest for job processing | Automation jobs > 300/min | Replace pg_cron polling with push-based Inngest workflow; eliminates 1-minute processing lag |
+| Consider dedicated Postgres | Supabase plan limits reached | AWS RDS `db.r6g.xlarge` on af-south-1; estimated ₦600,000/month; retain Supabase Auth |
+
+---
+
+## Section 11 — Product Roadmap
+
+### Quarter 1 — Launch (Weeks 1–12)
+
+| Week | Milestone | Business Impact |
+|---|---|---|
+| 1–2 | Phone OTP auth, owner + renter profile creation, Supabase DB live | Users can register and onboard |
+| 3–4 | Equipment listing CRUD with photo upload, admin verification queue | Owners can list; admin can approve |
+| 5–6 | Availability calendar, availability conflict prevention, rental creation | First bookings possible |
+| 7–8 | Paystack payment (rental + deposit), webhook handler, rental status state machine | First real money flows |
+| 9–10 | Condition checkout/checkin photo flow, deposit release automation | Equipment condition disputes have evidence |
+| 11 | SMS notifications (Termii), push notifications (Expo), search (PostGIS + FTS) | Renters can discover equipment; both parties get alerts |
+| 12 | Admin dashboard, dispute queue, performance profiling, soft launch 30 owners in Lagos | Platform goes live |
+
+### Quarter 2 — Growth
+
+| Feature | Metric Target |
+|---|---|
+| Owner payout to bank via Paystack Transfer | 100% of completed rentals paid out within 24h |
+| Reviews for equipment + owner + renter | Review submission rate > 35% of completed rentals |
+| Fleet dashboard for owners with ≥ 5 listings | 80% of fleet owners activate fleet view within 7 days |
+| PDF rental agreement auto-generation | Downloaded by > 60% of renters within first month |
+| Featured listings (self-serve, ₦8,000/week) | 20 paying featured listings within 60 days |
+| Expand to Abuja: geo-fenced onboarding | 200 active owners in Abuja within 90 days |
+
+### Quarter 3 — Scale
+
+| Feature | Metric Target |
+|---|---|
+| Pro owner subscription (₦5,000/month, fleet analytics + priority ranking) | 100 paying Pro owners by end of quarter |
+| Dispute admin fee (₦2,000 charged to losing party) | Dispute rate falls below 2% as deterrent |
+| Delivery logistics integration (third-party flatbeds via API) | 40% of Lagos rentals use platform-coordinated delivery |
+| Renter credit scoring (rental history → trust score → reduced deposit) | Repeat renters with ≥ 5 clean returns get 50% deposit reduction |
+| Expand to Port Harcourt and Kano | 200 active owners per city within 90 days |
+
+### Quarter 4 — Expansion
+
+| Feature | Metric Target |
+|---|---|
+| ToolHire for Construction Companies (B2B accounts, multi-user, invoicing) | 30 company accounts generating 20% of GMV |
+| Insurance integration (Leadway or AXA Mansard 7-day equipment cover) | 25% of rentals include optional insurance add-on |
+| ToolHire API (ERP and project management integrations) | 3 enterprise partners signed |
+| **Moonshot: AI damage detection** — automatically compare checkout vs checkin photos using computer vision; flag damage and estimate repair cost before admin review | Dispute resolution time drops from 48h to 4h; admin workload down 70% |
+
+---
+
+## Assumptions Made
+
+- **Stack**: Default stack applied — Next.js 14, Expo 51, Supabase, Paystack, Termii. No stack overrides specified.
+- **Target market**: Nigeria assumed — Paystack as primary payment provider, NGN as primary currency, amounts in kobo.
+- **Auth**: Phone OTP via Termii — no email dependency.
+- **Roles**: Four roles inferred from domain — `renter`, `owner`, `admin`, `super_admin`. Fleet owners are owners with `is_fleet_owner = true`.
+- **Booking model**: Renter pays full rental + deposit upfront. Owner receives payout after completed return (not at booking). Deposit held by Paystack until return verdict.
+- **Platform fee**: 10% gross on rental fee only — delivery fee passed through at 100% to owner. Net ~8.5% after Paystack processing.
+- **Deposit**: Held by platform (Paystack refund flow) — not by owner. Dispute admin fee (₦2,000) introduced in Q3.
+- **Conflict prevention**: `daterange` exclusion constraint used (daily granularity) rather than `tstzrange` (hourly), since equipment rentals are day-based.
+- **Condition photos**: Stored in private Supabase Storage bucket; accessed via signed URLs (2h expiry) — never public.
+- **Multi-tenancy**: Single-tenant MVP. Schema is multi-tenant-ready (`tenant_id` on all tables, RLS) for future SaaS expansion.
+- **Timezone**: Africa/Lagos (WAT, UTC+1) for all cron schedules and date display.
+- **Data residency**: Supabase on AWS `af-south-1` (Cape Town) — closest available region to Nigeria.
