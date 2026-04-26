@@ -1,5 +1,3 @@
-# Kajola
-The operating system for Africa's service economy. Connecting skilled artisans with clients across the continent.
 # Kajola — Production Platform Architect Skill
 
 > One prompt. Full system architecture. Zero placeholders.
@@ -50,15 +48,13 @@ Kajola automatically applies these patterns for any platform:
 mkdir -p .claude/skills
 
 # 2. Clone this repo into it
-git clone https://github.com/femi-adeyemo/kajola-skill.git .claude/skills/kajola
+git clone https://github.com/olu3242/Kajola.git .claude/skills/kajola
 
 # 3. Or as a submodule for easy updates
-git submodule add https://github.com/femi-adeyemo/kajola-skill.git .claude/skills/kajola
+git submodule add https://github.com/olu3242/Kajola.git .claude/skills/kajola
 ```
 
-### Manual .skill File
-
-Download `production-platform-architect.skill` from [Releases](../../releases) and install via Claude Code → Settings → Skills → Install from file.
+Once installed, Claude Code will automatically load the skill when you start a session in any project that has `.claude/skills/kajola` present.
 
 ---
 
@@ -91,13 +87,15 @@ M-Pesa payments. Full package.
 ## Skill Structure
 
 ```
-production-platform-architect/
-├── SKILL.md                        # Main skill instructions (~300 lines)
+kajola/
+├── SKILL.md                        # Main skill instructions (549 lines)
 ├── references/
 │   ├── sql-patterns.md             # Reusable SQL: triggers, RLS, PostGIS, slot gen
 │   └── output-template.md          # Structured output template for all 11 sections
-└── evals/
-    └── evals.json                  # Test cases for skill validation
+├── evals/
+│   └── evals.json                  # 6 test cases, 46 assertions
+└── examples/
+    └── kajola-artisan-platform.md  # Full generated output for reference
 ```
 
 ---
