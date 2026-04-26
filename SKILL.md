@@ -170,19 +170,33 @@ Rules:
 - Use enums for status fields
 - Add triggers for: `updated_at` maintenance, booking conflict prevention, balance updates
 
+**Conflict prevention — choose based on domain:**
+- Time-slot platforms (appointments, hourly bookings): use `tstzrange(starts_at, ends_at, '[)')` + `EXCLUDE USING gist` (requires `btree_gist`)
+- Day-based platforms (equipment rental, accommodation): use `daterange(starts_on, ends_on, '[]')` + `EXCLUDE USING gist`
+- Always exclude cancelled/refunded status rows from the constraint
+
+**Profile tables — one per distinct role:**
+- Every role beyond `admin` gets its own profile table (e.g. `artisan_profiles`, `client_profiles`, `owner_profiles`, `renter_profiles`)
+- Core `users` table holds auth identity (phone, role, push token) only
+- Role-specific profile tables hold domain data (rates, location, ratings, payout details)
+
+**Deposit / escrow — apply based on domain:**
+- Service bookings (artisan, cleaner, mechanic): single payment held in escrow; released to provider on job completion
+- Physical asset rentals (equipment, vehicles, property): two-part payment — rental fee (released on return) + security deposit (held separately; returned in full on clean return, partially on damage, forfeited on loss); add `deposit_status` enum and `deposit_deduction_kobo` column to the rentals table
+
 Generate the complete schema. No "// add more columns here" placeholders.
 
 Structure:
-1. Extensions block
+1. Extensions block (`uuid-ossp`, `pgcrypto`, `pg_trgm`, `postgis`, `pg_cron`, `btree_gist`)
 2. Enum definitions
-3. Helper functions (`current_user_tenant_id()`, `update_updated_at()`)
-4. Core tables (tenants, users, profiles)
+3. Helper functions (`current_user_tenant_id()`, `update_updated_at()`, `is_super_admin()`)
+4. Core tables (tenants, users, role-specific profiles)
 5. Domain tables (whatever the platform needs)
-6. Transaction/payment tables
-7. Notification/audit tables
+6. Transaction/payment tables (include deposit columns where applicable)
+7. Automation, notification, and audit tables
 8. RLS policies (grouped by table)
 9. Indexes (grouped by table)
-10. Seed data (enum values, admin user template)
+10. Seed data (default tenant, admin user template)
 
 ---
 
@@ -409,13 +423,12 @@ List every env var with name, description, and where to find/generate the value:
 
 **8.4 CI/CD Spec**
 
-```yaml
-# Describe the GitHub Actions pipeline:
-# - on: push to main
-# - jobs: lint, type-check, test, migrate (staging), deploy (staging)
-# - on: release tag
-# - jobs: migrate (prod), deploy web (Vercel), submit mobile (EAS)
-```
+Produce a working GitHub Actions YAML outline with two workflows:
+
+- **ci.yml** — triggers on push to main and on PRs; jobs: lint, type-check, deploy to staging (supabase db push + functions deploy + Vercel preview)
+- **release.yml** — triggers on version tags (`v*`); jobs: migrate production DB, deploy web to Vercel production, build and submit Expo app via EAS
+
+Name every job, list its key steps, and reference the correct secrets (e.g. `${{ secrets.PROD_SUPABASE_REF }}`).
 
 **8.5 Staging vs Production Checklist**
 
@@ -440,25 +453,36 @@ For each revenue stream, specify:
 
 **9.2 Pricing Tiers** (if applicable)
 
+Use real numbers — no `X,000` or `TBD`. Typical Nigerian SaaS ranges for reference:
+- Free tier: ₦0 — limited listings or transactions per month
+- Pro tier: ₦2,500–₦7,500/month — unlimited listings, analytics, priority ranking
+- Business/Fleet tier: ₦10,000–₦25,000/month — multi-user, API access, dedicated support
+
 | Tier | Price (monthly) | Inclusions | Target Segment |
 |---|---|---|---|
-| Free | ₦0 | ... | New providers |
-| Pro | ₦X,000 | ... | Established providers |
-| Business | ₦X,000 | ... | High-volume / agencies |
+| Free | ₦0 | [specific limits] | New/unverified providers |
+| Pro | ₦[amount] | [specific features] | Established providers |
+| Business | ₦[amount] | [specific features] | Agencies / fleet owners |
 
 **9.3 Fee Structure**
 
-Specify the exact transaction fee split:
-- Platform cut: X%
-- Provider receives: Y%
-- Payment processing cost: ~1.5% (Paystack Nigeria)
-- Net platform margin per transaction: Z%
+Specify exact percentages — no `X%`. Standard Nigerian marketplace ranges:
+- Platform cut: 8–15% of transaction value
+- Paystack processing: ~1.5% NGN (borne by platform or passed to user — specify which)
+- Net platform margin: platform cut minus processing cost
+
+Example format:
+- Platform fee: 10% of transaction value
+- Paystack processing (~1.5%): deducted from platform fee
+- Net platform margin: ~8.5%
+- Provider receives: 90% of transaction value
 
 **9.4 Featured Listings**
 
-- Cost per featured slot: ₦X,000 / week
-- Boost placement rules (top of search, category page, homepage)
-- Implementation: `is_featured` flag + `featured_until` timestamp
+Specify a real weekly rate (typical range: ₦3,000–₦10,000/week depending on category value):
+- Cost per featured slot: ₦[amount]/week
+- Boost placement: top of category search + homepage carousel
+- Implementation: `is_featured boolean` + `featured_until timestamptz` on the listing table; pg_cron job expires `is_featured` daily
 
 ---
 
@@ -477,17 +501,23 @@ For each threshold, specify concrete infrastructure actions — not generic advi
 
 **10.2 10,000 → 100,000 Users**
 
-- Specific read replica configuration
-- Search migration from Postgres FTS to Typesense
-- Redis/Upstash for session caching and rate limiting
-- Edge function optimization (warm instances, regional deployment)
+| Action | Trigger | Implementation |
+|---|---|---|
+| Migrate search to Typesense | FTS p95 > 500ms or quality complaints | Typesense Cloud ~$50/month; sync via Supabase webhook |
+| Add Upstash Redis for session/rate-limit caching | Auth Edge Function p95 > 200ms | Cache JWT role lookups 5 min; rate-limit OTP at Redis layer |
+| Upgrade Supabase to Large compute | DB CPU sustained > 70% | Large plan: 8GB RAM, 8 CPU |
+| Add Postgres read replica | Read:write ratio > 4:1 | Route search and list queries to replica |
+| Enable Edge Function warm instances | Cold start p95 > 1s | Supabase dedicated (always-warm) instances |
 
 **10.3 100,000 → 1,000,000 Users**
 
-- Database sharding strategy (if needed)
-- Microservices extraction candidates (payments, notifications)
-- Multi-region deployment
-- Dedicated infrastructure vs managed services cost analysis
+| Action | Trigger | Implementation |
+|---|---|---|
+| Extract Notifications service | End-to-end SMS/push latency > 2 min | Dedicated Node.js worker on Railway; subscribes to Supabase Realtime |
+| Extract Payments service | Webhook queue depth > 100 | Isolated service with own DB pool; eliminates payment contention on main DB |
+| Add second read replica | Primary replica lag > 100ms | Route by query type: analytics → replica 2, real-time → replica 1 |
+| Migrate to dedicated Postgres | Supabase plan limits reached | AWS RDS `db.r6g.xlarge` on af-south-1; retain Supabase Auth |
+| Multi-region Edge Functions | Latency > 400ms for users outside Lagos | Cloudflare Workers with regional routing; Supabase Auth retained centrally |
 
 ---
 
@@ -527,11 +557,15 @@ Before finishing, verify every section against these rules. If any check fails, 
 - [ ] Every SQL table has at least one non-PK index
 - [ ] Every API endpoint has auth requirement, request schema, response schema, and error cases
 - [ ] Every env var is named, described, and sourced
-- [ ] Booking/slot conflicts prevented at trigger level, not application level
+- [ ] Booking/slot conflicts prevented at DB level (`EXCLUDE USING gist`), not application level
+- [ ] Correct conflict range type used: `tstzrange` for hourly slots, `daterange` for day-based rentals
 - [ ] All automation jobs have idempotency keys
 - [ ] Payment webhook handlers verify HMAC signatures
 - [ ] Offline queue pattern included in mobile app structure
 - [ ] Phone OTP is the primary auth method (not email)
+- [ ] Physical asset platforms include deposit tracking (`deposit_status`, `deposit_deduction_kobo`) and condition photo flow
+- [ ] Section 9 contains no `X%`, `₦X,000`, or `TBD` — all rates are real numbers
+- [ ] Section 8.4 contains actual CI/CD job names and steps, not YAML comments
 
 ---
 
