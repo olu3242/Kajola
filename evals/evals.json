@@ -1,0 +1,291 @@
+{
+  "skill": "production-platform-architect",
+  "version": "1.0.0",
+  "description": "Evaluation cases for the Kajola skill. Each case defines a prompt, required sections, and specific assertions that must hold in the generated output.",
+  "cases": [
+    {
+      "id": "eval-001",
+      "name": "Artisan booking marketplace (Nigeria)",
+      "prompt": "Design a multi-tenant artisan booking platform for Nigeria called Kajola. Artisans (barbers, tailors, mechanics) create profiles and get booked. Clients discover and pay via Paystack. Need full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a001-01",
+          "description": "Phone OTP is the primary auth method",
+          "check": "output contains 'phone' and 'OTP' in Section 1 or Section 2",
+          "must_not_contain": ["email required", "email-based auth", "email is required"]
+        },
+        {
+          "id": "a001-02",
+          "description": "Paystack is specified as payment provider",
+          "check": "output contains 'Paystack' in Section 2, Section 3, and Section 8"
+        },
+        {
+          "id": "a001-03",
+          "description": "SQL schema has RLS on all tables",
+          "check": "every CREATE TABLE block in Section 3 has a corresponding ENABLE ROW LEVEL SECURITY statement"
+        },
+        {
+          "id": "a001-04",
+          "description": "Booking conflict prevention at DB level",
+          "check": "output contains 'EXCLUDE USING gist' or 'prevent_booking_conflict' trigger in Section 3"
+        },
+        {
+          "id": "a001-05",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a001-06",
+          "description": "Offline queue included in mobile structure",
+          "check": "output contains 'offline' or 'offline-queue' in Section 5"
+        },
+        {
+          "id": "a001-07",
+          "description": "All env vars named and sourced",
+          "check": "Section 8 contains a table with NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, PAYSTACK_SECRET_KEY, TERMII_API_KEY"
+        },
+        {
+          "id": "a001-08",
+          "description": "Webhook HMAC verification mentioned",
+          "check": "output contains 'HMAC' or 'webhook signature' in Section 7 or Section 4"
+        },
+        {
+          "id": "a001-09",
+          "description": "Monetization has actual rates",
+          "check": "Section 9 contains percentage values (e.g. '5%', '2.5%') and Naira amounts (e.g. '₦' or 'NGN')"
+        },
+        {
+          "id": "a001-10",
+          "description": "Scaling plan has three tiers",
+          "check": "Section 10 contains '10,000' or '10k' and '100,000' or '100k' and '1,000,000' or '1M'"
+        },
+        {
+          "id": "a001-11",
+          "description": "Assumptions block is present",
+          "check": "output contains '## Assumptions Made'"
+        },
+        {
+          "id": "a001-12",
+          "description": "Artisan roles represented in personas",
+          "check": "Section 1 mentions at least two distinct user roles (e.g. artisan/provider and client)"
+        }
+      ]
+    },
+    {
+      "id": "eval-002",
+      "name": "Equipment rental marketplace (East Africa)",
+      "prompt": "Build the complete system design for ToolHire Pro — an equipment rental marketplace for East African construction companies. Multi-tenant. M-Pesa payments. Full package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a002-01",
+          "description": "M-Pesa is included as primary payment method",
+          "check": "output contains 'M-Pesa' or 'Daraja' in Section 2, Section 3, and Section 4"
+        },
+        {
+          "id": "a002-02",
+          "description": "Currency is KES or multi-currency",
+          "check": "output contains 'KES' or 'Kenya shilling' or 'multi-currency'"
+        },
+        {
+          "id": "a002-03",
+          "description": "Availability/conflict handling for equipment",
+          "check": "Section 3 contains a conflict prevention mechanism for rental slot overlaps"
+        },
+        {
+          "id": "a002-04",
+          "description": "Multi-tenant RLS enforced",
+          "check": "output contains 'tenant_id' and 'current_user_tenant_id' in Section 3"
+        },
+        {
+          "id": "a002-05",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a002-06",
+          "description": "Equipment domain tables present",
+          "check": "Section 3 contains tables for equipment/inventory, rentals, and availability"
+        },
+        {
+          "id": "a002-07",
+          "description": "Deposit or damage management addressed",
+          "check": "Section 3 or Section 4 addresses security deposit or damage tracking"
+        },
+        {
+          "id": "a002-08",
+          "description": "East Africa market assumption logged",
+          "check": "Assumptions block mentions East Africa or Kenya as target market"
+        }
+      ]
+    },
+    {
+      "id": "eval-003",
+      "name": "Food delivery platform (Ghana)",
+      "prompt": "Design a food delivery platform for Accra, Ghana. Restaurants list menus, customers order, riders deliver. Need multi-restaurant support, real-time order tracking, and Flutterwave payments in GHS.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a003-01",
+          "description": "Flutterwave is primary payment provider",
+          "check": "output contains 'Flutterwave' in Sections 2, 4, and 8"
+        },
+        {
+          "id": "a003-02",
+          "description": "GHS currency used",
+          "check": "output contains 'GHS' or 'Ghana cedi' or 'pesewa'"
+        },
+        {
+          "id": "a003-03",
+          "description": "Real-time tracking addressed",
+          "check": "output contains 'Realtime' or 'WebSocket' or 'real-time' in Section 2 or Section 5"
+        },
+        {
+          "id": "a003-04",
+          "description": "Three roles present: customer, restaurant, rider",
+          "check": "Section 1 mentions three distinct personas or roles"
+        },
+        {
+          "id": "a003-05",
+          "description": "Menu and order tables in schema",
+          "check": "Section 3 contains tables for menus (or menu_items) and orders (or order_items)"
+        },
+        {
+          "id": "a003-06",
+          "description": "Rider location tracking addressed",
+          "check": "Section 3 or Section 2 addresses rider location updates (PostGIS or coordinates)"
+        },
+        {
+          "id": "a003-07",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a003-08",
+          "description": "Order status automation included",
+          "check": "Section 7 includes events for order state transitions (placed, accepted, picked_up, delivered)"
+        }
+      ]
+    },
+    {
+      "id": "eval-004",
+      "name": "Minimal prompt — defaults applied correctly",
+      "prompt": "Design a home cleaning services marketplace.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a004-01",
+          "description": "All 11 sections present despite minimal prompt",
+          "check": "output contains all 11 section headers"
+        },
+        {
+          "id": "a004-02",
+          "description": "Africa-first defaults applied",
+          "check": "output contains 'Paystack' or 'Termii' or 'phone OTP'"
+        },
+        {
+          "id": "a004-03",
+          "description": "Assumptions block explains defaults used",
+          "check": "output contains '## Assumptions Made' and mentions stack defaults"
+        },
+        {
+          "id": "a004-04",
+          "description": "No placeholder text despite sparse input",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "add more", "etc."]
+        },
+        {
+          "id": "a004-05",
+          "description": "Cleaning-specific domain tables generated",
+          "check": "Section 3 contains tables relevant to cleaning services (bookings, service_types, cleaners, or similar)"
+        }
+      ]
+    },
+    {
+      "id": "eval-005",
+      "name": "Custom stack override respected",
+      "prompt": "Build a freelance marketplace for African creatives (designers, writers, developers). Use Stripe for payments and Firebase for auth instead of Supabase. Target market: pan-African.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a005-01",
+          "description": "Stripe used instead of Paystack",
+          "check": "output contains 'Stripe' in Sections 2, 4, and 8",
+          "must_not_contain_in_sections": [2, 4, 8, "Paystack as primary"]
+        },
+        {
+          "id": "a005-02",
+          "description": "Firebase auth used instead of Supabase Auth",
+          "check": "output contains 'Firebase' in Sections 2 and 5"
+        },
+        {
+          "id": "a005-03",
+          "description": "Pan-African scope reflected",
+          "check": "output mentions multiple African countries or currencies in Section 9 or Section 10"
+        },
+        {
+          "id": "a005-04",
+          "description": "Freelance domain tables present",
+          "check": "Section 3 contains tables for gigs/projects, proposals/bids, and contracts or milestones"
+        },
+        {
+          "id": "a005-05",
+          "description": "Assumptions block notes stack overrides",
+          "check": "Assumptions block mentions Firebase and Stripe as user-specified overrides"
+        }
+      ]
+    },
+    {
+      "id": "eval-006",
+      "name": "Quality gate — zero placeholders enforcement",
+      "prompt": "Design a telemedicine platform for Nigeria. Doctors consult patients via video. Prescriptions managed digitally.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a006-01",
+          "description": "No placeholder text anywhere in output",
+          "must_not_contain": [
+            "TBD", "TODO", "your_value_here", "X%", "add more columns",
+            "add more fields", "etc.", "...", "placeholder", "coming soon",
+            "fill in", "insert here", "your secret", "YOUR_KEY"
+          ]
+        },
+        {
+          "id": "a006-02",
+          "description": "Video consultation provider specified",
+          "check": "output names a specific video provider (Daily.co, Twilio Video, Agora, Whereby, or similar)"
+        },
+        {
+          "id": "a006-03",
+          "description": "Prescription table in schema",
+          "check": "Section 3 contains a prescriptions table with at minimum: id, patient_id, doctor_id, medications, issued_at"
+        },
+        {
+          "id": "a006-04",
+          "description": "HIPAA/NDPR compliance mentioned",
+          "check": "output mentions data privacy compliance (NDPR for Nigeria or equivalent) in Section 1 or Section 8"
+        },
+        {
+          "id": "a006-05",
+          "description": "Appointment scheduling conflict prevention",
+          "check": "Section 3 contains booking conflict prevention for doctor appointments"
+        },
+        {
+          "id": "a006-06",
+          "description": "All API endpoints have error cases",
+          "check": "every endpoint block in Section 4 contains at least one 'Errors:' entry"
+        },
+        {
+          "id": "a006-07",
+          "description": "Monetization rates are specific numbers",
+          "check": "Section 9 contains at least one specific Naira amount (₦) or percentage with a digit"
+        }
+      ]
+    }
+  ],
+  "scoring": {
+    "method": "assertion_pass_rate",
+    "pass_threshold": 0.85,
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 6 cases pass."
+  }
+}
