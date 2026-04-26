@@ -1,0 +1,25 @@
+name: Validate Skill
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Skill structure validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python (for evals.json checks)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run validation
+        run: |
+          chmod +x scripts/validate-skill.sh
+          bash scripts/validate-skill.sh
