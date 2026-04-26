@@ -24,6 +24,22 @@ What's inside:
 
 ---
 
+### `toolhire-pro-nigeria.md`
+**Prompt**: "Build the complete system design for ToolHire Pro — an equipment rental marketplace for Nigerian construction companies. Multi-tenant. Paystack payments. Full package."
+
+**Market**: Nigeria · **Currency**: NGN · **Payments**: Paystack · **Auth**: Phone OTP (Termii)
+
+What's inside:
+- PRD with 4 personas (owner, renter, fleet manager, admin) and 19 features
+- Architecture with deposit hold/release flows and condition photo data flows
+- Full Postgres schema — 16 tables including `condition_records`, `availability_blocks` with `daterange` conflict prevention, dual deposit/rental transaction tracking
+- 22 API endpoints covering equipment search with date-range availability, condition photo upload, deposit deduction workflow
+- Next.js 14 + Expo 51 trees with fleet dashboard, condition photo comparison grid, date range picker
+- 12-event automation engine including deposit release, partial release, return reminders, auto-cancel
+- Deployment, monetization (₦8k/week featured, ₦5k/month Pro), scaling to 500k users, roadmap
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:
