@@ -941,3 +941,579 @@ VALUES ('00000000-0000-0000-0000-000000000002', 'ToolHire Pro', 'toolhire-pro', 
 -- INSERT INTO users (id, tenant_id, phone, role, full_name)
 -- VALUES ('<auth.users.id>', '00000000-0000-0000-0000-000000000002', '+2348000000001', 'super_admin', 'ToolHire Admin');
 ```
+
+---
+
+## Section 4 — API Definitions
+
+Base URL: `https://<project-ref>.supabase.co/functions/v1`
+All authenticated endpoints require: `Authorization: Bearer <jwt>`
+All amounts in kobo (1 NGN = 100 kobo).
+
+---
+
+### Auth
+
+```
+POST /auth/send-otp
+Auth: none
+Description: Send 6-digit OTP to phone via Termii SMS.
+
+Request:
+{ "phone": string }   // E.164, e.g. "+2348012345678"
+
+Response 200:
+{ "message": "OTP sent", "expires_in": 600 }
+
+Errors:
+- 400: Invalid E.164 phone format
+- 429: Max 3 OTP requests per phone per 10 minutes
+```
+
+```
+POST /auth/verify-otp
+Auth: none
+Description: Verify OTP, return Supabase session. Creates user record on first login.
+
+Request:
+{ "phone": string, "otp": string }
+
+Response 200:
+{
+  "access_token": string, "refresh_token": string, "expires_in": 3600,
+  "user": { "id": uuid, "phone": string, "role": string, "is_new": boolean }
+}
+
+Errors:
+- 401: Invalid or expired OTP
+- 429: Max 5 verification attempts per OTP
+```
+
+---
+
+### Equipment
+
+```
+GET /equipment/search
+Auth: bearer (optional)
+Description: Search equipment listings by category, location, availability, and price.
+
+Query params:
+  category          equipment_category   Filter by category
+  lat               float                Client latitude
+  lng               float                Client longitude
+  radius_km         integer              Search radius (default: 50, max: 200)
+  from_date         string               ISO date, rental start (e.g. "2026-05-01")
+  to_date           string               ISO date, rental end (e.g. "2026-05-07")
+  max_daily_rate    integer              Max daily rate in kobo
+  delivery_only     boolean              Only show equipment with delivery available
+  q                 string               Free-text search (title, make, model, location)
+  page              integer              Default 1
+  per_page          integer              Default 20, max 50
+
+Response 200:
+{
+  "data": [
+    {
+      "id": uuid, "title": string, "category": equipment_category,
+      "make": string, "model": string, "year": integer,
+      "daily_rate_kobo": integer, "weekly_rate_kobo": integer | null,
+      "deposit_kobo": integer, "delivery_available": boolean,
+      "delivery_rate_kobo": integer | null, "location_text": string,
+      "distance_km": float | null, "average_rating": float,
+      "total_reviews": integer, "is_featured": boolean,
+      "primary_photo_url": string | null,
+      "available": boolean   // true if no rental conflict for requested dates
+    }
+  ],
+  "total": integer, "page": integer, "per_page": integer
+}
+
+Errors:
+- 400: from_date after to_date
+- 400: from_date in the past
+```
+
+```
+GET /equipment/:id
+Auth: bearer (optional)
+Description: Full equipment detail with photos, availability, and recent reviews.
+
+Response 200:
+{
+  "id": uuid, "title": string, "category": equipment_category,
+  "description": string, "make": string, "model": string, "year": integer,
+  "capacity_spec": string, "daily_rate_kobo": integer,
+  "weekly_rate_kobo": integer | null, "deposit_kobo": integer,
+  "delivery_available": boolean, "delivery_rate_kobo": integer | null,
+  "min_rental_days": integer, "max_rental_days": integer,
+  "location_text": string, "average_rating": float, "total_reviews": integer,
+  "owner": { "id": uuid, "business_name": string, "average_rating": float, "total_completed_rentals": integer },
+  "photos": [ { "id": uuid, "url": string, "is_primary": boolean } ],
+  "blocked_dates": [ { "starts_on": string, "ends_on": string } ],
+  "recent_reviews": [ { "rating": integer, "comment": string, "created_at": string } ]
+}
+
+Errors:
+- 404: Equipment not found or not active
+```
+
+```
+POST /equipment
+Auth: bearer (owner role)
+Description: Create new equipment listing. Status starts as 'draft'.
+
+Request:
+{
+  "title": string, "category": equipment_category,
+  "description": string, "make": string, "model": string,
+  "year": integer, "capacity_spec": string,
+  "daily_rate_kobo": integer,       // minimum 500000 (₦5,000)
+  "weekly_rate_kobo": integer | null,
+  "deposit_kobo": integer,          // minimum 0
+  "delivery_available": boolean,
+  "delivery_rate_kobo": integer | null,
+  "min_rental_days": integer,       // minimum 1
+  "max_rental_days": integer,
+  "location_text": string, "lat": float, "lng": float
+}
+
+Response 201:
+{ "id": uuid, "status": "draft", "created_at": string }
+
+Errors:
+- 400: daily_rate_kobo below minimum (500000)
+- 403: User has no owner profile
+- 422: Validation error on any field
+```
+
+```
+POST /equipment/:id/submit-for-review
+Auth: bearer (owner, own listing)
+Description: Submit draft listing for admin verification. Requires at least 3 photos uploaded.
+
+Response 200:
+{ "id": uuid, "status": "pending_verification" }
+
+Errors:
+- 400: Listing has fewer than 3 photos
+- 403: Not the owner of this listing
+- 409: Listing not in 'draft' status
+```
+
+```
+GET /equipment/:id/availability
+Auth: bearer (optional)
+Description: Return blocked date ranges for an equipment listing.
+
+Query params:
+  from_date  string  ISO date, start of window to check (default: today)
+  to_date    string  ISO date, end of window (default: today + 90 days)
+
+Response 200:
+{
+  "equipment_id": uuid,
+  "blocked_ranges": [
+    { "starts_on": string, "ends_on": string, "reason": "booked" | "owner_block" }
+  ]
+}
+
+Errors:
+- 404: Equipment not found
+```
+
+---
+
+### Rentals
+
+```
+POST /rentals
+Auth: bearer (renter)
+Description: Create rental booking and initiate combined payment (rental + deposit). Returns Paystack checkout URL.
+
+Request:
+{
+  "equipment_id":        uuid,
+  "starts_on":           string,    // ISO date, e.g. "2026-05-01"
+  "ends_on":             string,    // ISO date, e.g. "2026-05-07"
+  "delivery_address_text": string | null,
+  "lat":                 float | null,
+  "lng":                 float | null,
+  "renter_note":         string | null
+}
+
+Response 201:
+{
+  "rental_id":           uuid,
+  "transaction_id":      uuid,
+  "rental_fee_kobo":     integer,
+  "delivery_fee_kobo":   integer,
+  "deposit_kobo":        integer,
+  "total_kobo":          integer,
+  "paystack_reference":  string,
+  "checkout_url":        string,
+  "expires_at":          string    // 30 minutes
+}
+
+Errors:
+- 400: starts_on in the past or less than 24 hours from now
+- 400: Rental duration outside min_rental_days / max_rental_days bounds
+- 404: Equipment not found or not active
+- 409: Date range conflicts with existing rental or availability block
+- 422: delivery_address required when equipment owner requires delivery
+```
+
+```
+POST /rentals/:id/confirm
+Auth: bearer (owner)
+Description: Owner confirms a pending rental.
+
+Response 200:
+{ "rental_id": uuid, "status": "confirmed" }
+
+Errors:
+- 403: Not the owner for this rental
+- 409: Rental not in 'pending' status
+```
+
+```
+POST /rentals/:id/checkout-photos
+Auth: bearer (owner)
+Description: Upload pre-rental condition photos. Marks rental as delivery_in_progress.
+
+Request (multipart/form-data):
+  photos[]   File[]   Up to 10 JPEG/PNG/WebP files, max 5MB each
+
+Response 200:
+{
+  "condition_record_id": uuid,
+  "photo_count": integer,
+  "rental_status": "delivery_in_progress"
+}
+
+Errors:
+- 400: No photos provided or more than 10 photos
+- 403: Not the owner for this rental
+- 409: Rental not in 'confirmed' status
+- 409: Checkout record already exists for this rental
+```
+
+```
+POST /rentals/:id/acknowledge-checkout
+Auth: bearer (renter)
+Description: Renter confirms receipt of equipment and acknowledges checkout condition.
+
+Response 200:
+{ "rental_id": uuid, "status": "active" }
+
+Errors:
+- 403: Not the renter for this rental
+- 409: Rental not in 'delivery_in_progress' status
+```
+
+```
+POST /rentals/:id/checkin-photos
+Auth: bearer (owner)
+Description: Upload return condition photos and declare verdict.
+
+Request (multipart/form-data):
+  photos[]   File[]    Up to 10 JPEG/PNG/WebP files, max 5MB each
+  verdict    string    "clean" | "damaged" | "missing_parts"
+  notes      string    Required if verdict is not 'clean'
+  deposit_deduction_kobo  integer  Required if verdict is not 'clean'; must be <= deposit_kobo
+
+Response 200:
+{
+  "condition_record_id": uuid,
+  "verdict": string,
+  "deposit_deduction_kobo": integer,
+  "deposit_refund_kobo": integer
+}
+
+Errors:
+- 400: deposit_deduction_kobo exceeds deposit_kobo
+- 400: notes required when verdict is not 'clean'
+- 403: Not the owner for this rental
+- 409: Rental not in 'active' status
+```
+
+```
+POST /rentals/:id/cancel
+Auth: bearer (renter or owner)
+Description: Cancel a rental. Triggers full refund if payment captured and rental not yet delivered.
+
+Request:
+{ "reason": string }
+
+Response 200:
+{ "rental_id": uuid, "status": "cancelled", "refund_initiated": boolean }
+
+Errors:
+- 403: Not a participant in this rental
+- 409: Rental cannot be cancelled — already delivered or completed
+```
+
+```
+GET /rentals
+Auth: bearer
+Description: List rentals for authenticated user (renter or owner view).
+
+Query params:
+  status    rental_status   Filter by status
+  page      integer         Default 1
+  per_page  integer         Default 20
+
+Response 200:
+{
+  "data": [ { ...rental fields + equipment_title + counterparty_name } ],
+  "total": integer, "page": integer, "per_page": integer
+}
+```
+
+---
+
+### Payments & Deposit
+
+```
+POST /webhooks/paystack
+Auth: none (verified via X-Paystack-Signature HMAC)
+Description: Receive Paystack events. Returns 200 immediately; processes async.
+
+Headers:
+  X-Paystack-Signature: sha512 HMAC of raw body
+
+Response 200:
+{ "received": true }
+
+Errors:
+- 401: HMAC signature mismatch
+```
+
+---
+
+### Reviews
+
+```
+POST /reviews
+Auth: bearer
+Description: Submit a review after rental completion. One review per rental per reviewee type.
+
+Request:
+{
+  "rental_id":     uuid,
+  "reviewee_type": "equipment" | "owner" | "renter",
+  "rating":        integer,    // 1–5
+  "comment":       string      // optional, max 500 chars
+}
+
+Response 201:
+{ "id": uuid, "rental_id": uuid, "reviewee_type": string, "rating": integer }
+
+Errors:
+- 403: Reviewer is not a participant in this rental
+- 409: Review already submitted for this rental + reviewee_type
+- 422: Rental not in 'completed' status
+```
+
+---
+
+### Admin
+
+```
+GET /admin/stats
+Auth: bearer (admin or super_admin)
+Description: Platform health metrics.
+
+Response 200:
+{
+  "gmv_today_kobo":              integer,
+  "gmv_this_month_kobo":         integer,
+  "active_rentals":              integer,
+  "pending_verifications":       integer,
+  "open_deposit_disputes":       integer,
+  "registered_owners":           integer,
+  "registered_renters":          integer,
+  "equipment_utilisation_pct":   float    // % of active listings with active rental today
+}
+```
+
+```
+PATCH /admin/equipment/:id/verify
+Auth: bearer (admin or super_admin)
+Description: Approve or reject equipment listing.
+
+Request:
+{ "status": "active" | "rejected", "note": string }
+
+Response 200:
+{ "equipment_id": uuid, "status": string }
+
+Errors:
+- 403: Not admin
+- 404: Equipment not found
+- 409: Equipment not in 'pending_verification' status
+```
+
+```
+POST /admin/disputes/:id/resolve
+Auth: bearer (admin or super_admin)
+Description: Resolve deposit dispute in favour of renter or owner.
+
+Request:
+{
+  "resolution":        "renter" | "owner",
+  "resolved_amount_kobo": integer,
+  "resolution_note":   string
+}
+
+Response 200:
+{ "dispute_id": uuid, "status": "resolved_renter" | "resolved_owner" }
+
+Errors:
+- 403: Not admin
+- 409: Dispute already resolved
+```
+
+---
+
+## Section 5 — Frontend Structure
+
+### 5.1 Next.js 14 Web Dashboard
+
+```
+apps/web/
+├── app/
+│   ├── (auth)/
+│   │   ├── login/page.tsx              # Phone input, Nigeria (+234) default, send OTP
+│   │   └── verify/page.tsx             # 6-digit OTP input with 60s resend timer
+│   ├── (owner)/
+│   │   ├── layout.tsx                  # Sidebar nav + owner role guard
+│   │   ├── dashboard/page.tsx          # Earnings summary, active rentals, pending confirmations
+│   │   ├── listings/
+│   │   │   ├── page.tsx                # Equipment list with status badges; Add New CTA
+│   │   │   ├── new/page.tsx            # Multi-step listing creation wizard
+│   │   │   └── [id]/
+│   │   │       ├── page.tsx            # Listing detail: photos, specs, rental calendar
+│   │   │       └── edit/page.tsx       # Edit listing specs, rates, availability blocks
+│   │   ├── rentals/
+│   │   │   ├── page.tsx                # Incoming/active/past rentals list with status tabs
+│   │   │   └── [id]/page.tsx           # Rental detail: renter info, condition photos, actions
+│   │   ├── wallet/page.tsx             # Earnings history, pending payouts, bank account setup
+│   │   └── profile/page.tsx            # Business name, yard location, KYC documents
+│   ├── (renter)/
+│   │   ├── layout.tsx                  # Top nav + renter role guard
+│   │   ├── page.tsx                    # Home: search bar, category chips, nearby featured listings
+│   │   ├── search/page.tsx             # Full search with map/list toggle, date range picker, filters
+│   │   ├── equipment/[id]/page.tsx     # Equipment detail: photos carousel, specs, availability, Book CTA
+│   │   ├── book/[equipmentId]/page.tsx # Booking flow: dates → delivery → review total → Paystack checkout
+│   │   ├── rentals/
+│   │   │   ├── page.tsx                # My rentals with status tabs
+│   │   │   └── [id]/page.tsx           # Rental detail: condition photos comparison, status timeline, actions
+│   │   └── profile/page.tsx            # Company name, RC number, saved addresses
+│   ├── (fleet)/
+│   │   ├── layout.tsx                  # Fleet dashboard layout (owner with is_fleet_owner = true)
+│   │   ├── page.tsx                    # Fleet overview: utilisation % per asset, earnings by machine
+│   │   └── assets/page.tsx             # All listings with bulk status management
+│   ├── (admin)/
+│   │   ├── layout.tsx                  # Admin sidebar + admin role guard
+│   │   ├── page.tsx                    # GMV chart, stats cards, verification queue, dispute queue
+│   │   ├── equipment/
+│   │   │   ├── page.tsx                # All listings; filter by status
+│   │   │   └── [id]/page.tsx           # Listing detail with verify/reject actions
+│   │   ├── rentals/page.tsx            # All rentals searchable by equipment title or user phone
+│   │   └── disputes/
+│   │       ├── page.tsx                # Open deposit disputes queue
+│   │       └── [id]/page.tsx           # Side-by-side checkout vs checkin photos + resolve form
+│   └── api/webhooks/paystack/route.ts  # Verifies X-Paystack-Signature, forwards to Edge Function
+├── components/
+│   ├── ui/                             # shadcn/ui: Button, Input, Card, Badge, Dialog, Table, Tabs, Skeleton, Calendar
+│   ├── forms/
+│   │   ├── PhoneInput.tsx              # react-phone-number-input, Nigerian prefix default
+│   │   ├── OtpInput.tsx                # 6 auto-advancing digit inputs
+│   │   ├── LocationPicker.tsx          # Google Places Autocomplete + map drag pin
+│   │   └── DateRangePicker.tsx         # Calendar with blocked dates highlighted in red
+│   ├── equipment/
+│   │   ├── EquipmentCard.tsx           # Photo, title, category badge, rate, distance, rating
+│   │   ├── EquipmentMap.tsx            # Google Maps with equipment markers, category icon pins
+│   │   ├── PhotoCarousel.tsx           # Full-screen swipeable photo gallery
+│   │   └── AvailabilityCalendar.tsx    # Month calendar: green=available, red=blocked, selected range
+│   ├── rentals/
+│   │   ├── RentalStatusTimeline.tsx    # Vertical step indicator: confirmed→delivered→active→returned
+│   │   ├── ConditionPhotoGrid.tsx      # Side-by-side checkout/checkin photo comparison grid
+│   │   └── DepositSummary.tsx          # Held amount, verdict, deduction, refund due
+│   └── layout/
+│       ├── Sidebar.tsx                 # Role-aware nav links (owner vs renter vs admin)
+│       └── TopNav.tsx                  # User avatar, notifications bell, sign out
+├── lib/
+│   ├── supabase/
+│   │   ├── client.ts                   # createBrowserClient()
+│   │   └── server.ts                   # createServerClient()
+│   ├── payments/
+│   │   └── paystack.ts                 # initializeTransaction(), verifyTransaction(), initiateTransfer(), createRecipient()
+│   └── sms/
+│       └── termii.ts                   # sendOtp(), sendSms() — server-only
+├── hooks/
+│   ├── useUser.ts                      # Auth state, role helpers
+│   ├── useRentals.ts                   # Rental list with Realtime subscription for status updates
+│   └── useEquipmentSearch.ts           # Debounced search with URL state sync, date range state
+└── types/
+    └── database.ts                     # supabase gen types typescript --project-id <ref>
+```
+
+### 5.2 Expo 51 Mobile App
+
+```
+apps/mobile/
+├── app/
+│   ├── (auth)/
+│   │   ├── index.tsx                   # Phone entry with country flag picker
+│   │   └── verify.tsx                  # OTP input, resend countdown, WhatsApp fallback link
+│   ├── (renter)/
+│   │   ├── _layout.tsx                 # Bottom tabs: Home, Search, Rentals, Profile
+│   │   ├── home.tsx                    # Category chips, featured listings, recent searches
+│   │   ├── search.tsx                  # Search bar, date range picker, FlatList / MapView toggle
+│   │   ├── rentals.tsx                 # Active and past rentals list; pull to refresh
+│   │   └── profile.tsx                 # Company info, wallet balance, settings
+│   ├── (owner)/
+│   │   ├── _layout.tsx                 # Bottom tabs: Dashboard, Listings, Rentals, Wallet, Profile
+│   │   ├── dashboard.tsx               # Today's earnings, pending confirmations, active rentals
+│   │   ├── listings.tsx                # Equipment list with add button
+│   │   ├── rentals.tsx                 # Incoming and active rentals, confirm/action buttons
+│   │   ├── wallet.tsx                  # Balance, payout history
+│   │   └── profile.tsx                 # Business details, KYC photo upload
+│   ├── equipment/[id].tsx              # Equipment detail: photo carousel, specs, availability, Book CTA
+│   ├── book/
+│   │   ├── dates.tsx                   # Step 1: pick rental start and end date
+│   │   ├── delivery.tsx                # Step 2: enter delivery address or select pickup
+│   │   └── payment.tsx                 # Step 3: review breakdown (rental + delivery + deposit), pay
+│   ├── rental/[id].tsx                 # Rental detail with status timeline and action sheet
+│   └── condition/
+│       ├── checkout.tsx                # Owner: upload up to 10 photos before delivery
+│       └── checkin.tsx                 # Owner: upload return photos, select verdict, set deduction
+├── components/
+│   ├── ui/
+│   │   ├── Button.tsx                  # Min 48px height, variants: primary/secondary/destructive
+│   │   ├── Input.tsx                   # Keyboard-aware, accessible label + error
+│   │   ├── Card.tsx                    # Rounded 12px, shadow, press state
+│   │   ├── SkeletonLoader.tsx          # Shimmer for loading states
+│   │   ├── EmptyState.tsx              # Illustration + heading + optional CTA
+│   │   └── DateRangePicker.tsx         # Native calendar with multi-day range selection
+│   ├── equipment/
+│   │   ├── EquipmentCard.tsx           # Horizontal card: photo, title, rate, distance badge
+│   │   └── CategoryIcon.tsx            # SVG icons per equipment_category enum value
+│   ├── rentals/
+│   │   ├── RentalStatusBadge.tsx       # Colour-coded pill per rental_status
+│   │   └── ConditionPhotoUploader.tsx  # expo-image-picker + upload to Supabase Storage
+│   └── payments/
+│       └── RentalBreakdown.tsx         # Line-item summary: rental fee, delivery, deposit, total
+├── hooks/
+│   ├── useAuth.ts                      # Session, user, signOut
+│   ├── useOfflineQueue.ts              # Queue write actions; sync on reconnect via NetInfo
+│   ├── useLocation.ts                  # expo-location permission + current coords
+│   └── useRealtimeRental.ts            # Subscribe to rental row changes via Supabase Realtime
+├── lib/
+│   ├── supabase.ts                     # createClient with AsyncStorage session
+│   ├── notifications.ts                # registerForPushNotificationsAsync(), handleNotificationResponse()
+│   └── offline-queue.ts                # AsyncStorage queue; processes on foreground + network restore
+└── constants/
+    └── theme.ts                        # Colors: primary #0A3D62, accent #F39C12, error #C0392B; spacing 4/8/12/16/24/32
