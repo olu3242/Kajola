@@ -251,3 +251,693 @@ Nigeria's construction sector generates over ₦15 trillion in annual activity, 
 6. Credits `wallets.balance_kobo` for owner, creates `wallet_transactions` row
 7. Termii SMS to owner: "₦35,400 sent to your Access Bank account ****7823. Rental: 20KVA Gen, 1–7 May. Ref: THP-TRF-00187"
 8. Deposit payout handled separately via `deposit.release` job (above)
+
+---
+
+## Section 3 — Full SQL Schema
+
+### Extensions
+
+```sql
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+CREATE EXTENSION IF NOT EXISTS "unaccent";
+CREATE EXTENSION IF NOT EXISTS "postgis";
+CREATE EXTENSION IF NOT EXISTS "pg_cron";
+CREATE EXTENSION IF NOT EXISTS "btree_gist";
+```
+
+### Enums
+
+```sql
+CREATE TYPE user_role AS ENUM ('renter', 'owner', 'admin', 'super_admin');
+
+CREATE TYPE equipment_category AS ENUM (
+  'generator', 'excavator', 'bulldozer', 'crane', 'forklift',
+  'compactor', 'concrete_mixer', 'scaffolding', 'pump', 'compressor',
+  'welding_machine', 'tipper_truck', 'other'
+);
+
+CREATE TYPE equipment_status AS ENUM ('draft', 'pending_verification', 'active', 'suspended', 'retired');
+
+CREATE TYPE rental_status AS ENUM (
+  'pending', 'confirmed', 'delivery_in_progress', 'active',
+  'return_in_progress', 'completed', 'cancelled', 'deposit_disputed'
+);
+
+CREATE TYPE deposit_status AS ENUM (
+  'held', 'released_full', 'released_partial', 'forfeited', 'disputed'
+);
+
+CREATE TYPE payment_status AS ENUM (
+  'pending', 'success', 'failed', 'refunded', 'partially_refunded'
+);
+
+CREATE TYPE transaction_type AS ENUM (
+  'rental_payment', 'delivery_fee', 'deposit_hold', 'deposit_release',
+  'deposit_deduction', 'platform_fee', 'owner_payout', 'refund'
+);
+
+CREATE TYPE condition_record_type AS ENUM ('checkout', 'checkin');
+
+CREATE TYPE condition_verdict AS ENUM ('clean', 'damaged', 'missing_parts');
+
+CREATE TYPE notification_channel AS ENUM ('sms', 'push', 'whatsapp', 'email');
+
+CREATE TYPE notification_status AS ENUM ('pending', 'sent', 'delivered', 'failed');
+
+CREATE TYPE job_status AS ENUM ('pending', 'running', 'completed', 'failed', 'dead');
+
+CREATE TYPE dispute_status AS ENUM ('open', 'under_review', 'resolved_renter', 'resolved_owner', 'closed');
+
+CREATE TYPE verification_status AS ENUM ('unverified', 'pending', 'verified', 'rejected');
+```
+
+### Helper Functions
+
+```sql
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION current_user_tenant_id()
+RETURNS uuid AS $$
+  SELECT (auth.jwt() ->> 'tenant_id')::uuid;
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION is_super_admin()
+RETURNS boolean AS $$
+  SELECT coalesce((auth.jwt() ->> 'role') = 'super_admin', false);
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION is_admin_or_above()
+RETURNS boolean AS $$
+  SELECT coalesce((auth.jwt() ->> 'role') IN ('admin', 'super_admin'), false);
+$$ LANGUAGE sql STABLE;
+```
+
+### Core Tables
+
+```sql
+-- ─── tenants ───────────────────────────────────────────────────────────────
+CREATE TABLE tenants (
+  id          uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name        text NOT NULL,
+  slug        text NOT NULL UNIQUE,
+  plan        text NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'pro', 'enterprise')),
+  is_active   boolean NOT NULL DEFAULT true,
+  settings    jsonb NOT NULL DEFAULT '{}',
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_tenants_updated_at
+  BEFORE UPDATE ON tenants FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ─── users ─────────────────────────────────────────────────────────────────
+CREATE TABLE users (
+  id                  uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  tenant_id           uuid NOT NULL REFERENCES tenants(id),
+  phone               text NOT NULL UNIQUE,
+  role                user_role NOT NULL DEFAULT 'renter',
+  full_name           text,
+  avatar_url          text,
+  expo_push_token     text,
+  whatsapp_opted_in   boolean NOT NULL DEFAULT false,
+  referral_code       text NOT NULL UNIQUE DEFAULT substr(md5(random()::text), 1, 8),
+  is_active           boolean NOT NULL DEFAULT true,
+  last_seen_at        timestamptz,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_users_updated_at
+  BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX users_tenant_idx ON users (tenant_id);
+CREATE INDEX users_phone_idx ON users (phone);
+
+-- ─── owner_profiles ────────────────────────────────────────────────────────
+CREATE TABLE owner_profiles (
+  id                      uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id                 uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  tenant_id               uuid NOT NULL REFERENCES tenants(id),
+  business_name           text,
+  is_fleet_owner          boolean NOT NULL DEFAULT false,
+  yard_address            text,
+  yard_location           geography(POINT, 4326),
+  verification_status     verification_status NOT NULL DEFAULT 'unverified',
+  id_document_url         text,
+  cac_document_url        text,
+  paystack_recipient_code text,
+  paystack_subaccount_code text,
+  average_rating          numeric(3,2) NOT NULL DEFAULT 0 CHECK (average_rating BETWEEN 0 AND 5),
+  total_reviews           integer NOT NULL DEFAULT 0,
+  total_completed_rentals integer NOT NULL DEFAULT 0,
+  deleted_at              timestamptz,
+  created_at              timestamptz NOT NULL DEFAULT now(),
+  updated_at              timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_owner_profiles_updated_at
+  BEFORE UPDATE ON owner_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX owner_profiles_user_idx ON owner_profiles (user_id);
+CREATE INDEX owner_profiles_tenant_idx ON owner_profiles (tenant_id) WHERE deleted_at IS NULL;
+CREATE INDEX owner_profiles_yard_location_idx ON owner_profiles USING GIST (yard_location) WHERE deleted_at IS NULL;
+
+-- ─── renter_profiles ───────────────────────────────────────────────────────
+CREATE TABLE renter_profiles (
+  id                      uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id                 uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  tenant_id               uuid NOT NULL REFERENCES tenants(id),
+  company_name            text,
+  rc_number               text,
+  site_address            text,
+  average_rating          numeric(3,2) NOT NULL DEFAULT 0 CHECK (average_rating BETWEEN 0 AND 5),
+  total_reviews           integer NOT NULL DEFAULT 0,
+  total_completed_rentals integer NOT NULL DEFAULT 0,
+  deleted_at              timestamptz,
+  created_at              timestamptz NOT NULL DEFAULT now(),
+  updated_at              timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_renter_profiles_updated_at
+  BEFORE UPDATE ON renter_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX renter_profiles_user_idx ON renter_profiles (user_id);
+CREATE INDEX renter_profiles_tenant_idx ON renter_profiles (tenant_id) WHERE deleted_at IS NULL;
+```
+
+### Domain Tables
+
+```sql
+-- ─── equipment ─────────────────────────────────────────────────────────────
+CREATE TABLE equipment (
+  id                  uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  owner_id            uuid NOT NULL REFERENCES owner_profiles(id) ON DELETE CASCADE,
+  tenant_id           uuid NOT NULL REFERENCES tenants(id),
+  title               text NOT NULL,
+  category            equipment_category NOT NULL,
+  description         text,
+  make                text,
+  model               text,
+  year                smallint CHECK (year BETWEEN 1970 AND 2030),
+  capacity_spec       text,
+  daily_rate_kobo     bigint NOT NULL CHECK (daily_rate_kobo > 0),
+  weekly_rate_kobo    bigint CHECK (weekly_rate_kobo > 0),
+  deposit_kobo        bigint NOT NULL DEFAULT 0 CHECK (deposit_kobo >= 0),
+  delivery_available  boolean NOT NULL DEFAULT false,
+  delivery_rate_kobo  bigint CHECK (delivery_rate_kobo >= 0),
+  min_rental_days     smallint NOT NULL DEFAULT 1 CHECK (min_rental_days >= 1),
+  max_rental_days     smallint NOT NULL DEFAULT 30 CHECK (max_rental_days >= min_rental_days),
+  location_text       text NOT NULL,
+  location            geography(POINT, 4326),
+  status              equipment_status NOT NULL DEFAULT 'draft',
+  is_featured         boolean NOT NULL DEFAULT false,
+  featured_until      timestamptz,
+  average_rating      numeric(3,2) NOT NULL DEFAULT 0 CHECK (average_rating BETWEEN 0 AND 5),
+  total_reviews       integer NOT NULL DEFAULT 0,
+  total_rentals       integer NOT NULL DEFAULT 0,
+  search_vector       tsvector,
+  deleted_at          timestamptz,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_equipment_updated_at
+  BEFORE UPDATE ON equipment FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX equipment_tenant_category_idx ON equipment (tenant_id, category) WHERE deleted_at IS NULL AND status = 'active';
+CREATE INDEX equipment_owner_idx ON equipment (owner_id) WHERE deleted_at IS NULL;
+CREATE INDEX equipment_location_idx ON equipment USING GIST (location) WHERE deleted_at IS NULL AND status = 'active';
+CREATE INDEX equipment_featured_idx ON equipment (is_featured, featured_until) WHERE status = 'active';
+CREATE INDEX equipment_search_idx ON equipment USING GIN (search_vector);
+CREATE INDEX equipment_title_trgm_idx ON equipment USING GIN (title gin_trgm_ops);
+
+CREATE OR REPLACE FUNCTION update_equipment_search_vector()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.search_vector := to_tsvector('english',
+    coalesce(NEW.title, '') || ' ' ||
+    coalesce(NEW.description, '') || ' ' ||
+    coalesce(NEW.make, '') || ' ' ||
+    coalesce(NEW.model, '') || ' ' ||
+    coalesce(NEW.location_text, '') || ' ' ||
+    coalesce(NEW.category::text, '')
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER equipment_search_vector_update
+  BEFORE INSERT OR UPDATE ON equipment
+  FOR EACH ROW EXECUTE FUNCTION update_equipment_search_vector();
+
+-- ─── equipment_photos ──────────────────────────────────────────────────────
+CREATE TABLE equipment_photos (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  equipment_id    uuid NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
+  storage_path    text NOT NULL,
+  is_primary      boolean NOT NULL DEFAULT false,
+  sort_order      smallint NOT NULL DEFAULT 0,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX equipment_photos_equipment_idx ON equipment_photos (equipment_id, sort_order);
+
+-- ─── availability_blocks ───────────────────────────────────────────────────
+-- Owner-set unavailability windows (maintenance, personal use, etc.)
+CREATE TABLE availability_blocks (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  equipment_id    uuid NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
+  starts_on       date NOT NULL,
+  ends_on         date NOT NULL CHECK (ends_on >= starts_on),
+  reason          text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX availability_blocks_equipment_idx ON availability_blocks (equipment_id, starts_on, ends_on);
+
+-- ─── rentals ───────────────────────────────────────────────────────────────
+CREATE TABLE rentals (
+  id                    uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id             uuid NOT NULL REFERENCES tenants(id),
+  renter_id             uuid NOT NULL REFERENCES users(id),
+  owner_id              uuid NOT NULL REFERENCES owner_profiles(id),
+  equipment_id          uuid NOT NULL REFERENCES equipment(id),
+  status                rental_status NOT NULL DEFAULT 'pending',
+  starts_on             date NOT NULL,
+  ends_on               date NOT NULL CHECK (ends_on >= starts_on),
+  rental_days           smallint NOT NULL GENERATED ALWAYS AS (ends_on - starts_on + 1) STORED,
+  delivery_address_text text,
+  delivery_location     geography(POINT, 4326),
+  rental_fee_kobo       bigint NOT NULL CHECK (rental_fee_kobo > 0),
+  delivery_fee_kobo     bigint NOT NULL DEFAULT 0 CHECK (delivery_fee_kobo >= 0),
+  deposit_kobo          bigint NOT NULL DEFAULT 0 CHECK (deposit_kobo >= 0),
+  platform_fee_kobo     bigint NOT NULL DEFAULT 0 CHECK (platform_fee_kobo >= 0),
+  owner_payout_kobo     bigint NOT NULL CHECK (owner_payout_kobo > 0),
+  deposit_status        deposit_status NOT NULL DEFAULT 'held',
+  deposit_deduction_kobo bigint NOT NULL DEFAULT 0 CHECK (deposit_deduction_kobo >= 0),
+  deposit_deduction_reason text,
+  renter_note           text,
+  cancellation_reason   text,
+  cancelled_by          uuid REFERENCES users(id),
+  confirmed_at          timestamptz,
+  delivered_at          timestamptz,
+  returned_at           timestamptz,
+  completed_at          timestamptz,
+  -- Prevent double-booking at DB level
+  CONSTRAINT no_double_rental EXCLUDE USING gist (
+    equipment_id WITH =,
+    daterange(starts_on, ends_on, '[]') WITH &&
+  ) WHERE (status NOT IN ('cancelled')),
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_rentals_updated_at
+  BEFORE UPDATE ON rentals FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX rentals_tenant_idx ON rentals (tenant_id, created_at DESC);
+CREATE INDEX rentals_renter_idx ON rentals (renter_id, created_at DESC);
+CREATE INDEX rentals_owner_idx ON rentals (owner_id, starts_on);
+CREATE INDEX rentals_equipment_idx ON rentals (equipment_id, starts_on, ends_on);
+CREATE INDEX rentals_status_idx ON rentals (status, created_at DESC) WHERE status IN ('pending','confirmed','active','deposit_disputed');
+
+-- ─── condition_records ─────────────────────────────────────────────────────
+CREATE TABLE condition_records (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  rental_id       uuid NOT NULL REFERENCES rentals(id) ON DELETE CASCADE,
+  type            condition_record_type NOT NULL,
+  verdict         condition_verdict,
+  notes           text,
+  photo_paths     text[] NOT NULL DEFAULT '{}',
+  recorded_by     uuid NOT NULL REFERENCES users(id),
+  renter_acknowledged_at timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT condition_records_rental_type_unique UNIQUE (rental_id, type)
+);
+
+CREATE INDEX condition_records_rental_idx ON condition_records (rental_id);
+
+-- ─── reviews ───────────────────────────────────────────────────────────────
+CREATE TABLE reviews (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  rental_id       uuid NOT NULL REFERENCES rentals(id),
+  reviewer_id     uuid NOT NULL REFERENCES users(id),
+  reviewee_type   text NOT NULL CHECK (reviewee_type IN ('equipment', 'owner', 'renter')),
+  reviewee_id     uuid NOT NULL,
+  rating          smallint NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment         text,
+  is_visible      boolean NOT NULL DEFAULT true,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT reviews_rental_reviewer_reviewee_unique UNIQUE (rental_id, reviewer_id, reviewee_type)
+);
+
+CREATE TRIGGER set_reviews_updated_at
+  BEFORE UPDATE ON reviews FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX reviews_reviewee_idx ON reviews (reviewee_type, reviewee_id, created_at DESC) WHERE is_visible = true;
+
+-- Auto-update equipment and owner average ratings
+CREATE OR REPLACE FUNCTION refresh_equipment_rating()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.reviewee_type = 'equipment' THEN
+    UPDATE equipment SET
+      average_rating = (SELECT ROUND(AVG(rating)::numeric, 2) FROM reviews WHERE reviewee_type = 'equipment' AND reviewee_id = NEW.reviewee_id AND is_visible = true),
+      total_reviews  = (SELECT COUNT(*) FROM reviews WHERE reviewee_type = 'equipment' AND reviewee_id = NEW.reviewee_id AND is_visible = true)
+    WHERE id = NEW.reviewee_id;
+  ELSIF NEW.reviewee_type = 'owner' THEN
+    UPDATE owner_profiles SET
+      average_rating = (SELECT ROUND(AVG(rating)::numeric, 2) FROM reviews WHERE reviewee_type = 'owner' AND reviewee_id = NEW.reviewee_id AND is_visible = true),
+      total_reviews  = (SELECT COUNT(*) FROM reviews WHERE reviewee_type = 'owner' AND reviewee_id = NEW.reviewee_id AND is_visible = true)
+    WHERE id = NEW.reviewee_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_ratings_after_review
+  AFTER INSERT OR UPDATE ON reviews
+  FOR EACH ROW EXECUTE FUNCTION refresh_equipment_rating();
+
+-- ─── disputes ──────────────────────────────────────────────────────────────
+CREATE TABLE disputes (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  rental_id       uuid NOT NULL UNIQUE REFERENCES rentals(id),
+  raised_by       uuid NOT NULL REFERENCES users(id),
+  status          dispute_status NOT NULL DEFAULT 'open',
+  reason          text NOT NULL,
+  claimed_amount_kobo bigint NOT NULL DEFAULT 0,
+  resolution_note text,
+  resolved_amount_kobo bigint,
+  resolved_by     uuid REFERENCES users(id),
+  resolved_at     timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_disputes_updated_at
+  BEFORE UPDATE ON disputes FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX disputes_tenant_status_idx ON disputes (tenant_id, status, created_at DESC);
+```
+
+### Payment Tables
+
+```sql
+-- ─── transactions ──────────────────────────────────────────────────────────
+CREATE TABLE transactions (
+  id                  uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id           uuid NOT NULL REFERENCES tenants(id),
+  rental_id           uuid REFERENCES rentals(id),
+  type                transaction_type NOT NULL,
+  status              payment_status NOT NULL DEFAULT 'pending',
+  amount_kobo         bigint NOT NULL CHECK (amount_kobo > 0),
+  currency            text NOT NULL DEFAULT 'NGN',
+  paystack_reference  text UNIQUE,
+  paystack_access_code text,
+  provider_response   jsonb,
+  initiated_by        uuid NOT NULL REFERENCES users(id),
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_transactions_updated_at
+  BEFORE UPDATE ON transactions FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX transactions_tenant_idx ON transactions (tenant_id, created_at DESC);
+CREATE INDEX transactions_rental_idx ON transactions (rental_id);
+CREATE INDEX transactions_paystack_ref_idx ON transactions (paystack_reference);
+
+-- ─── wallets ───────────────────────────────────────────────────────────────
+CREATE TABLE wallets (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id         uuid NOT NULL UNIQUE REFERENCES users(id),
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  balance_kobo    bigint NOT NULL DEFAULT 0 CHECK (balance_kobo >= 0),
+  currency        text NOT NULL DEFAULT 'NGN',
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_wallets_updated_at
+  BEFORE UPDATE ON wallets FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ─── wallet_transactions ───────────────────────────────────────────────────
+CREATE TABLE wallet_transactions (
+  id                  uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  wallet_id           uuid NOT NULL REFERENCES wallets(id),
+  type                text NOT NULL CHECK (type IN ('credit', 'debit')),
+  amount_kobo         bigint NOT NULL CHECK (amount_kobo > 0),
+  balance_after_kobo  bigint NOT NULL,
+  reference           text NOT NULL UNIQUE,
+  description         text NOT NULL,
+  rental_id           uuid REFERENCES rentals(id),
+  metadata            jsonb NOT NULL DEFAULT '{}',
+  created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX wallet_transactions_wallet_idx ON wallet_transactions (wallet_id, created_at DESC);
+CREATE INDEX wallet_transactions_rental_idx ON wallet_transactions (rental_id);
+
+-- ─── webhook_logs ──────────────────────────────────────────────────────────
+CREATE TABLE webhook_logs (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  provider        text NOT NULL CHECK (provider IN ('paystack', 'twilio', 'termii')),
+  event_type      text NOT NULL,
+  payload         jsonb NOT NULL,
+  idempotency_key text NOT NULL UNIQUE,
+  processed       boolean NOT NULL DEFAULT false,
+  processed_at    timestamptz,
+  error           text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX webhook_logs_unprocessed_idx ON webhook_logs (processed, created_at) WHERE processed = false;
+```
+
+### Automation & Audit Tables
+
+```sql
+-- ─── automation_jobs ───────────────────────────────────────────────────────
+CREATE TABLE automation_jobs (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  job_type        text NOT NULL,
+  payload         jsonb NOT NULL DEFAULT '{}',
+  status          job_status NOT NULL DEFAULT 'pending',
+  idempotency_key text UNIQUE,
+  attempts        integer NOT NULL DEFAULT 0,
+  max_attempts    integer NOT NULL DEFAULT 3,
+  next_run_at     timestamptz NOT NULL DEFAULT now(),
+  last_error      text,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_automation_jobs_updated_at
+  BEFORE UPDATE ON automation_jobs FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX automation_jobs_pending_idx ON automation_jobs (next_run_at) WHERE status = 'pending';
+
+-- ─── notification_logs ─────────────────────────────────────────────────────
+CREATE TABLE notification_logs (
+  id                  uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id             uuid NOT NULL REFERENCES users(id),
+  channel             notification_channel NOT NULL,
+  status              notification_status NOT NULL DEFAULT 'pending',
+  template            text NOT NULL,
+  content             text NOT NULL,
+  provider_message_id text,
+  rental_id           uuid REFERENCES rentals(id),
+  error               text,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TRIGGER set_notification_logs_updated_at
+  BEFORE UPDATE ON notification_logs FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE INDEX notification_logs_user_idx ON notification_logs (user_id, created_at DESC);
+CREATE INDEX notification_logs_rental_idx ON notification_logs (rental_id);
+
+-- ─── phone_otps ────────────────────────────────────────────────────────────
+CREATE TABLE phone_otps (
+  id          uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  phone       text NOT NULL,
+  otp_hash    text NOT NULL,
+  expires_at  timestamptz NOT NULL DEFAULT (now() + interval '10 minutes'),
+  verified_at timestamptz,
+  attempts    integer NOT NULL DEFAULT 0,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX phone_otps_phone_idx ON phone_otps (phone, created_at DESC);
+
+-- ─── audit_logs ────────────────────────────────────────────────────────────
+CREATE TABLE audit_logs (
+  id          uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id   uuid REFERENCES tenants(id),
+  user_id     uuid REFERENCES users(id),
+  action      text NOT NULL,
+  entity_type text NOT NULL,
+  entity_id   uuid NOT NULL,
+  old_data    jsonb,
+  new_data    jsonb,
+  ip_address  inet,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX audit_logs_entity_idx ON audit_logs (entity_type, entity_id);
+CREATE INDEX audit_logs_tenant_idx ON audit_logs (tenant_id, created_at DESC);
+```
+
+### RLS Policies
+
+```sql
+ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenants_super_admin" ON tenants USING (is_super_admin());
+
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users_tenant_select" ON users FOR SELECT
+  USING (tenant_id = current_user_tenant_id() OR is_super_admin());
+CREATE POLICY "users_own_update" ON users FOR UPDATE
+  USING (id = auth.uid() OR is_admin_or_above());
+
+ALTER TABLE owner_profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "owner_profiles_public_select" ON owner_profiles FOR SELECT
+  USING (deleted_at IS NULL);
+CREATE POLICY "owner_profiles_own_insert" ON owner_profiles FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+CREATE POLICY "owner_profiles_own_update" ON owner_profiles FOR UPDATE
+  USING (user_id = auth.uid() OR is_admin_or_above());
+
+ALTER TABLE renter_profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "renter_profiles_own_select" ON renter_profiles FOR SELECT
+  USING (user_id = auth.uid() OR is_admin_or_above());
+CREATE POLICY "renter_profiles_own_insert" ON renter_profiles FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+CREATE POLICY "renter_profiles_own_update" ON renter_profiles FOR UPDATE
+  USING (user_id = auth.uid() OR is_admin_or_above());
+
+ALTER TABLE equipment ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "equipment_public_select" ON equipment FOR SELECT
+  USING (status = 'active' AND deleted_at IS NULL);
+CREATE POLICY "equipment_owner_select_all" ON equipment FOR SELECT
+  USING (EXISTS (SELECT 1 FROM owner_profiles WHERE id = owner_id AND user_id = auth.uid()) OR is_admin_or_above());
+CREATE POLICY "equipment_owner_insert" ON equipment FOR INSERT
+  WITH CHECK (EXISTS (SELECT 1 FROM owner_profiles WHERE id = owner_id AND user_id = auth.uid()));
+CREATE POLICY "equipment_owner_update" ON equipment FOR UPDATE
+  USING (EXISTS (SELECT 1 FROM owner_profiles WHERE id = owner_id AND user_id = auth.uid()) OR is_admin_or_above());
+
+ALTER TABLE equipment_photos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "equipment_photos_public_select" ON equipment_photos FOR SELECT USING (true);
+CREATE POLICY "equipment_photos_owner_write" ON equipment_photos FOR ALL
+  USING (EXISTS (SELECT 1 FROM equipment e JOIN owner_profiles op ON e.owner_id = op.id WHERE e.id = equipment_id AND op.user_id = auth.uid()));
+
+ALTER TABLE availability_blocks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "availability_blocks_public_select" ON availability_blocks FOR SELECT USING (true);
+CREATE POLICY "availability_blocks_owner_write" ON availability_blocks FOR ALL
+  USING (EXISTS (SELECT 1 FROM equipment e JOIN owner_profiles op ON e.owner_id = op.id WHERE e.id = equipment_id AND op.user_id = auth.uid()));
+
+ALTER TABLE rentals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "rentals_participant_select" ON rentals FOR SELECT
+  USING (
+    renter_id = auth.uid() OR
+    EXISTS (SELECT 1 FROM owner_profiles WHERE id = owner_id AND user_id = auth.uid()) OR
+    is_admin_or_above()
+  );
+CREATE POLICY "rentals_renter_insert" ON rentals FOR INSERT
+  WITH CHECK (renter_id = auth.uid());
+CREATE POLICY "rentals_participant_update" ON rentals FOR UPDATE
+  USING (
+    renter_id = auth.uid() OR
+    EXISTS (SELECT 1 FROM owner_profiles WHERE id = owner_id AND user_id = auth.uid()) OR
+    is_admin_or_above()
+  );
+
+ALTER TABLE condition_records ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "condition_records_participant_select" ON condition_records FOR SELECT
+  USING (EXISTS (
+    SELECT 1 FROM rentals r WHERE r.id = rental_id AND (
+      r.renter_id = auth.uid() OR
+      EXISTS (SELECT 1 FROM owner_profiles op WHERE op.id = r.owner_id AND op.user_id = auth.uid())
+    )
+  ) OR is_admin_or_above());
+CREATE POLICY "condition_records_owner_insert" ON condition_records FOR INSERT
+  WITH CHECK (recorded_by = auth.uid());
+
+ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "reviews_public_select" ON reviews FOR SELECT USING (is_visible = true);
+CREATE POLICY "reviews_participant_insert" ON reviews FOR INSERT
+  WITH CHECK (
+    reviewer_id = auth.uid() AND
+    EXISTS (SELECT 1 FROM rentals WHERE id = rental_id AND (renter_id = auth.uid() OR EXISTS (SELECT 1 FROM owner_profiles WHERE id = owner_id AND user_id = auth.uid())) AND status = 'completed')
+  );
+
+ALTER TABLE disputes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "disputes_participant_select" ON disputes FOR SELECT
+  USING (raised_by = auth.uid() OR is_admin_or_above());
+CREATE POLICY "disputes_participant_insert" ON disputes FOR INSERT
+  WITH CHECK (raised_by = auth.uid());
+CREATE POLICY "disputes_admin_update" ON disputes FOR UPDATE USING (is_admin_or_above());
+
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "transactions_participant_select" ON transactions FOR SELECT
+  USING (initiated_by = auth.uid() OR is_admin_or_above());
+
+ALTER TABLE wallets ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "wallets_own_select" ON wallets FOR SELECT
+  USING (user_id = auth.uid() OR is_admin_or_above());
+
+ALTER TABLE wallet_transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "wallet_transactions_own_select" ON wallet_transactions FOR SELECT
+  USING (EXISTS (SELECT 1 FROM wallets WHERE id = wallet_id AND user_id = auth.uid()) OR is_admin_or_above());
+
+-- Service-role-only tables
+ALTER TABLE automation_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE phone_otps ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "automation_jobs_admin" ON automation_jobs FOR SELECT USING (is_admin_or_above());
+CREATE POLICY "notification_logs_admin" ON notification_logs FOR SELECT USING (is_admin_or_above());
+CREATE POLICY "audit_logs_admin" ON audit_logs FOR SELECT USING (is_admin_or_above());
+```
+
+### Scheduled Cleanup Jobs
+
+```sql
+SELECT cron.schedule('cleanup-expired-otps', '0 2 * * *',
+  $$ DELETE FROM phone_otps WHERE expires_at < now() - interval '1 day'; $$);
+
+SELECT cron.schedule('cleanup-webhook-logs', '0 3 * * *',
+  $$ DELETE FROM webhook_logs WHERE processed = true AND created_at < now() - interval '30 days'; $$);
+
+SELECT cron.schedule('process-automation-jobs', '* * * * *',
+  $$ SELECT net.http_post(
+    url := current_setting('app.edge_function_base_url') || '/automation/process',
+    headers := jsonb_build_object('Authorization', 'Bearer ' || current_setting('app.service_role_key')),
+    body := '{}'::jsonb); $$);
+```
+
+### Seed Data
+
+```sql
+INSERT INTO tenants (id, name, slug, plan)
+VALUES ('00000000-0000-0000-0000-000000000002', 'ToolHire Pro', 'toolhire-pro', 'enterprise');
+
+-- Super admin: create via Supabase Auth dashboard, then:
+-- INSERT INTO users (id, tenant_id, phone, role, full_name)
+-- VALUES ('<auth.users.id>', '00000000-0000-0000-0000-000000000002', '+2348000000001', 'super_admin', 'ToolHire Admin');
+```
