@@ -26,7 +26,7 @@ jobs:
           npx tsc -p apps/mobile/tsconfig.json --noEmit
           npx tsc -p packages/api/tsconfig.json --noEmit
       - name: Lint web
-        run: npm run lint --workspace @kajola/web
+        run: npm -w @kajola/web run lint
       - name: Validate migrations
         shell: pwsh
         run: ./scripts/migrations/validate.ps1
