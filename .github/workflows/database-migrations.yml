@@ -48,7 +48,7 @@ jobs:
           $changed = git diff --name-only origin/${{ github.base_ref }}...HEAD
           Write-Host "Changed files ($($changed.Count)):"
           $changed | ForEach-Object { Write-Host "  $_" }
-          $schemaTouch = $changed | Where-Object { $_ -match 'supabase/functions/|packages/db/src|apps/web/app/api/' }
+          $schemaTouch = $changed | Where-Object { $_ -match '(supabase/functions/.+\.(ts|sql)|packages/db/src/.+\.ts|apps/web/app/api/.+\.(ts|tsx))' }
           $migrationTouch = $changed | Where-Object { $_ -match '^supabase/migrations/.+\.sql$' }
           Write-Host "Schema-adjacent: $($schemaTouch -join ', ')"
           Write-Host "Migration files: $($migrationTouch -join ', ')"
