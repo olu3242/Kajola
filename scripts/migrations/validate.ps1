@@ -4,7 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$namePattern = '^\d{8}_\d{6}_[a-z0-9_]+\.sql$'
+$namePattern = '^\d{14}_[a-z0-9_]+\.sql$'
 $unsafePatterns = @(
   '(?i)\bDROP\s+TABLE\b',
   '(?i)\bDROP\s+COLUMN\b',

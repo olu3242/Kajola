@@ -12,8 +12,10 @@ When Claude Code loads this skill, it reads `SKILL.md` as its instruction set. W
 SKILL.md                        Core instruction set. Start here.
 references/sql-patterns.md      Reusable Postgres patterns (copy-paste ready)
 references/output-template.md   Exact formatting guide for all 11 output sections
-evals/evals.json                Test cases — 6 scenarios, 46 assertions
+references/api-patterns.md      Reusable Edge Function patterns (response envelope, HMAC, pagination)
+evals/evals.json                Test cases — 6 scenarios, 45 assertions
 examples/                       Full generated outputs (reference / demo)
+CONTRIBUTING.md                 Guide for community contributors
 ```
 
 ## Updating the Skill
@@ -33,6 +35,10 @@ examples/                       Full generated outputs (reference / demo)
 **To add a new SQL pattern:**
 1. Add the pattern block to `references/sql-patterns.md` under the appropriate heading
 2. Reference it in `SKILL.md` if it should be applied by default (e.g. "use audit log pattern from references/sql-patterns.md")
+
+**To add a new API / Edge Function pattern:**
+1. Add the pattern block to `references/api-patterns.md` under the appropriate heading
+2. Reference it in `SKILL.md` if it should be emitted by default in Section 7 or Section 8
 
 **To add a new eval case:**
 1. Add a new object to the `cases` array in `evals/evals.json`

@@ -3,7 +3,10 @@
   "compilerOptions": {
     "composite": true,
     "declaration": true,
-    "outDir": "dist"
+    "outDir": "dist",
+    "noEmit": false
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

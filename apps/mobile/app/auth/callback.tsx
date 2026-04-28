@@ -17,7 +17,7 @@ export default function AuthCallbackScreen() {
           throw new Error('Unable to read auth callback URL.');
         }
 
-        const { data, error } = await supabase.auth.getSessionFromUrl({ storeSession: false, url });
+        const { data, error } = await supabase.auth.exchangeCodeForSession(url);
         if (error || !data.session) {
           throw new Error(error?.message ?? 'Unable to complete Google sign-in.');
         }

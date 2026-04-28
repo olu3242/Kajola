@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '../../lib/supabaseClient';
+import { supabase } from '../../../lib/supabaseClient';
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -10,7 +10,7 @@ export default function AuthCallbackPage() {
 
   useEffect(() => {
     async function handleRedirect() {
-      const { data, error } = await supabase.auth.getSessionFromUrl({ storeSession: false });
+      const { data, error } = await supabase.auth.getSession();
       if (error || !data.session) {
         setMessage(error?.message ?? 'Unable to complete Google sign-in.');
         return;

@@ -66,9 +66,11 @@ echo "[ File existence ]"
 assert_file_exists "SKILL.md"
 assert_file_exists "references/sql-patterns.md"
 assert_file_exists "references/output-template.md"
+assert_file_exists "references/api-patterns.md"
 assert_file_exists "evals/evals.json"
 assert_file_exists "CLAUDE.md"
 assert_file_exists "README.md"
+assert_file_exists "CONTRIBUTING.md"
 
 # ── 2. SKILL.md — all 11 section headers present ────────────────────────────
 echo ""
@@ -106,7 +108,15 @@ echo "[ SKILL.md — no placeholders in instructions ]"
 assert_not_contains "SKILL.md" "YOUR_VALUE_HERE"              "No YOUR_VALUE_HERE placeholder"
 assert_not_contains "SKILL.md" "coming soon\|fill in\|YOUR_KEY" "No fill-in placeholder text"
 
-# ── 6. references/sql-patterns.md — key patterns present ────────────────────
+# ── 6. references/api-patterns.md — key patterns present ────────────────────
+echo ""
+echo "[ references/api-patterns.md — key patterns ]"
+assert_contains "references/api-patterns.md" "verifyPaystack\|x-paystack-signature" "Paystack HMAC webhook verification present"
+assert_contains "references/api-patterns.md" "idempotency\|idempotent"              "Idempotency guard pattern present"
+assert_contains "references/api-patterns.md" "tenant_id"                            "Tenant-scoped query pattern present"
+assert_contains "references/api-patterns.md" "success.*true\|error.*message"        "Response envelope pattern present"
+
+# ── 7. references/sql-patterns.md — key patterns present ────────────────────
 echo ""
 echo "[ references/sql-patterns.md — key patterns ]"
 assert_contains "references/sql-patterns.md" "update_updated_at"       "updated_at trigger pattern present"
@@ -119,7 +129,7 @@ assert_contains "references/sql-patterns.md" "tsvector"                "Full-tex
 assert_contains "references/sql-patterns.md" "geography(POINT"         "PostGIS location pattern present"
 assert_contains "references/sql-patterns.md" "audit_logs"              "Audit log pattern present"
 
-# ── 7. references/output-template.md — all sections templated ───────────────
+# ── 8. references/output-template.md — all sections templated ───────────────
 echo ""
 echo "[ references/output-template.md — section templates ]"
 for i in 1 2 3 4 5 6 7 8 9 10 11; do
@@ -127,7 +137,7 @@ for i in 1 2 3 4 5 6 7 8 9 10 11; do
 done
 assert_contains "references/output-template.md" "Assumptions Made"     "Assumptions block template present"
 
-# ── 8. evals/evals.json — structure validation ──────────────────────────────
+# ── 9. evals/evals.json — structure validation ──────────────────────────────
 echo ""
 echo "[ evals/evals.json — structure ]"
 
@@ -178,7 +188,7 @@ else
   check "evals.json has scoring block" "fail"
 fi
 
-# ── 9. README.md — installation and usage ───────────────────────────────────
+# ── 10. README.md — installation and usage ──────────────────────────────────
 echo ""
 echo "[ README.md — completeness ]"
 assert_contains "README.md" "git clone\|git submodule" "Installation instructions present"
