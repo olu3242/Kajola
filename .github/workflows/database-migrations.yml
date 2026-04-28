@@ -35,7 +35,7 @@ jobs:
         shell: pwsh
         run: |
           $changed = git diff --name-only origin/${{ github.base_ref }}...HEAD
-          $schemaTouch = $changed | Where-Object { $_ -match 'supabase/functions|packages/db|apps/web/app/api' }
+          $schemaTouch = $changed | Where-Object { $_ -match 'supabase/functions/|packages/db/src|apps/web/app/api/' }
           $migrationTouch = $changed | Where-Object { $_ -match '^supabase/migrations/.+\.sql$' }
           if ($schemaTouch -and -not $migrationTouch) {
             throw "Schema-adjacent changes require a migration or an explicit no-op migration."
