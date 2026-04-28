@@ -17,28 +17,45 @@ jobs:
         with:
           node-version: 20
           cache: npm
+
       - name: Install dependencies
         run: npm ci
+
       - name: TypeScript checks
         run: |
+          echo "--- TS web ---"
           npx tsc -p apps/web/tsconfig.json --noEmit
+          echo "--- TS mobile ---"
           npx tsc -p apps/mobile/tsconfig.json --noEmit
+          echo "--- TS api ---"
           npx tsc -p packages/api/tsconfig.json --noEmit
+          echo "--- TS OK ---"
+
       - name: Lint web
         run: npm -w @kajola/web run lint
+
       - name: Validate migrations
         shell: pwsh
-        run: ./scripts/migrations/validate.ps1
+        run: |
+          Write-Host "--- Migration validation ---"
+          ./scripts/migrations/validate.ps1
+          Write-Host "--- Migrations OK ---"
+
       - name: Require migration for schema-adjacent changes
         if: github.event_name == 'pull_request'
         shell: pwsh
         run: |
           $changed = git diff --name-only origin/${{ github.base_ref }}...HEAD
+          Write-Host "Changed files ($($changed.Count)):"
+          $changed | ForEach-Object { Write-Host "  $_" }
           $schemaTouch = $changed | Where-Object { $_ -match 'supabase/functions/|packages/db/src|apps/web/app/api/' }
           $migrationTouch = $changed | Where-Object { $_ -match '^supabase/migrations/.+\.sql$' }
+          Write-Host "Schema-adjacent: $($schemaTouch -join ', ')"
+          Write-Host "Migration files: $($migrationTouch -join ', ')"
           if ($schemaTouch -and -not $migrationTouch) {
             throw "Schema-adjacent changes require a migration or an explicit no-op migration."
           }
+          Write-Host "--- Schema check OK ---"
 
   deploy-staging:
     name: Deploy Staging
