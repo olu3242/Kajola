@@ -51,7 +51,7 @@ jobs:
           Write-Host "Changed files ($($changed.Count)):"
           $changed | ForEach-Object { Write-Host "  $_" }
           $schemaTouch = $changed | Where-Object { $_ -match '(supabase/functions/.+\.(ts|sql)|packages/db/src/.+\.ts|apps/web/app/api/.+\.(ts|tsx))' }
-          $migrationTouch = $changed | Where-Object { $_ -match '^supabase/migrations/.+\.sql$' }
+          $migrationTouch = $changed | Where-Object { $_ -match '^supabase/migrations/\d{14}_[a-z0-9_]+\.sql$' }
           Write-Host "Schema-adjacent: $($schemaTouch -join ', ')"
           Write-Host "Migration files: $($migrationTouch -join ', ')"
           if ($schemaTouch -and -not $migrationTouch) {

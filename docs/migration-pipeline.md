@@ -3,7 +3,7 @@
 ## Rules
 - Every schema change must be a file in `supabase/migrations`.
 - Never edit production schema manually.
-- Name migrations `YYYYMMDD_HHMMSS_description.sql`.
+- Name migrations `YYYYMMDDHHmmss_description.sql` (14-digit timestamp, Supabase CLI format).
 - Prefer safe rollout: add column, backfill, switch app logic, remove later.
 - Destructive SQL requires `ALLOW_DESTRUCTIVE_MIGRATION` and a matching rollback file in `supabase/rollbacks`.
 
