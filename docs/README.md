@@ -1,8 +1,10 @@
-# Kajola Documentation
+# Docs
 
-This folder is reserved for product docs, architecture notes, and operational runbooks.
+Operational documentation for the Kajola monorepo scaffold.
 
-Suggested files:
-- `architecture.md`
-- `deployment.md`
-- `roadmap.md`
+| File | Contents |
+|------|----------|
+| `api-endpoints.md` | Full API endpoint contract — auth, method, request/response, errors |
+| `migration-pipeline.md` | Migration rules, local/staging/production flow, rollback strategy |
+
+> These docs cover the monorepo scaffold. For the Claude Code skill itself, see `SKILL.md` and `references/`.
