@@ -268,6 +268,25 @@ CREATE TABLE users ( ... );
 CREATE TABLE [provider/client]_profiles ( ... );
 \`\`\`
 
+### Required SORF Core Tables
+
+Every booking/appointment platform must include the following tables with these exact names.
+Add platform-specific columns freely — these are the minimum required columns and constraints:
+
+| Table | Required columns / constraints |
+|---|---|
+| `businesses` | `deposit_policy jsonb`, `cancellation_policy jsonb`, `no_show_policy jsonb`, `tenant_id` |
+| `branches` | FK to `businesses`, `location geography(POINT,4326)`, `name`, `tenant_id` |
+| `staff` | FK to `branches`, `is_active bool`, `tenant_id` |
+| `services` | FK to `businesses`, `duration_minutes int`, `price_kobo bigint`, `tenant_id` |
+| `availability_windows` | FK to `staff`, `day_of_week int CHECK (0–6)`, `start_time time`, `end_time time` |
+| `availability_overrides` | FK to `staff`, `date date`, `is_available bool`, `start_time time`, `end_time time` |
+| `bookings` | SORF 9-state `booking_status` enum, `EXCLUDE USING gist` on `(staff_id, tstzrange(starts_at, ends_at, '[)'))`, `held_until timestamptz`, `deposit_paid bool` |
+| `waitlist_entries` | FK to service / staff, `customer_id`, `notified_at timestamptz`; trigger fires on booking cancellation / no_show |
+| `loyalty_accounts` | FK to customer/user, `points_balance int`, `tier text` |
+| `loyalty_transactions` | FK to `loyalty_accounts`, `points_delta int`, `booking_id`, `idempotency_key text UNIQUE` |
+| `branch_kpis` | Materialised view on `branches`; `REFRESH MATERIALIZED VIEW CONCURRENTLY` via pg_cron every 15 min |
+
 ### Domain Tables
 
 \`\`\`sql
@@ -497,7 +516,19 @@ For sections 6–11, the template keys are:
 
 **Section 8 — Deployment**: Numbered steps (no vague instructions). Every env var in table format. GitHub Actions YAML outline (not pseudocode — actual job names and steps). Staging vs production config table.
 
-**Section 9 — Monetization**: All rates as actual numbers (never "X%" or "TBD"). Revenue projections at 1k/10k/100k transactions. Paystack split payment configuration steps.
+**Section 9 — Monetization**: All rates as actual numbers (never "X%" or "TBD"). Use the following format for every revenue stream:
+
+| Stream | Model | Rate | Implementation | Projected (1k/10k/100k monthly transactions) |
+|---|---|---|---|---|
+| [Stream name] | [transaction fee / subscription / listing fee / featured placement] | [exact ₦ amount or exact %] | [Paystack split / manual deduction / recurring plan / etc.] | [₦X / ₦Y / ₦Z per month] |
+
+Rules:
+- Every rate must be a specific number (e.g. `10%`, `₦5,000/month`, `₦500 flat fee`) — never `X%`, `TBD`, or a range without anchoring to a midpoint
+- Revenue projections must use the exact rate, not a rounded estimate
+- If platform uses Paystack split, specify the exact split percentage (e.g. `90% provider / 10% platform`)
+- Include at minimum 2 revenue streams (e.g. transaction fee + SaaS subscription)
+- Section 9.2 Pricing Tiers must include at least 2 tiers with exact per-month NGN / KES / GHS / XOF prices
+- Section 9.3 or equivalent must compute monthly revenue at a realistic scale (e.g. 10k transactions × avg fee × rate = MRR estimate)
 
 **Section 10 — Scaling**: Concrete actions at each threshold. Specific Supabase settings to change. Index strategies tied to query patterns. Cost estimates where relevant.
 

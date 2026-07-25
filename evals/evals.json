@@ -805,11 +805,142 @@
           "check": "output contains '## Assumptions Made' and mentions Côte d'Ivoire or Senegal or XOF"
         }
       ]
+    },
+    {
+      "id": "eval-015",
+      "name": "Gym and fitness class booking with memberships (Nigeria)",
+      "prompt": "Design a multi-location gym and fitness class booking platform for Nigeria called FitBook. Members browse and enroll in scheduled group classes (yoga, HIIT, spinning) or book 1:1 personal training sessions. Gym franchises manage multiple locations and trainers. Members subscribe monthly via Paystack recurring billing (unlimited classes) or buy class packs (10 classes, prepaid). QR code check-in at gym gate. No-show without 2-hour notice loses one class credit. Trainers set their own weekly availability. Loyalty FitPoints earned per session. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a015-01",
+          "description": "Class capacity model distinct from 1:1 appointment (enrolled_count + max_capacity)",
+          "check": "Section 3 contains 'enrolled_count' and 'max_capacity' for class sessions"
+        },
+        {
+          "id": "a015-02",
+          "description": "Membership table with recurring billing type",
+          "check": "Section 3 contains 'memberships' table with 'paystack_sub_code' or 'billing_type' or 'recurring'"
+        },
+        {
+          "id": "a015-03",
+          "description": "Class pack / credits system present",
+          "check": "Section 3 or Section 4 contains 'class_pack' or 'credits_remaining' for purchased class packs"
+        },
+        {
+          "id": "a015-04",
+          "description": "EXCLUDE USING gist prevents trainer double-booking for 1:1 PT sessions",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for trainer slot conflict prevention"
+        },
+        {
+          "id": "a015-05",
+          "description": "availability_windows for trainer weekly scheduling",
+          "check": "Section 3 contains 'availability_windows' with day_of_week for trainer scheduling"
+        },
+        {
+          "id": "a015-06",
+          "description": "SORF 9-state booking lifecycle for PT sessions",
+          "check": "Section 3 contains 'booking_status' enum with 'held' and 'checked_in' and 'no_show'"
+        },
+        {
+          "id": "a015-07",
+          "description": "QR code check-in mechanism present",
+          "check": "Section 3 or Section 4 contains 'check_in_code' or 'qr' or 'QR' for member check-in"
+        },
+        {
+          "id": "a015-08",
+          "description": "No-show credit deduction policy (< 2h cancellation)",
+          "check": "Section 3 or Section 7 contains no_show_policy or credit deduction logic for late cancellation"
+        },
+        {
+          "id": "a015-09",
+          "description": "Paystack recurring subscription API used for unlimited membership",
+          "check": "Section 4 or Section 7 or Section 8 contains Paystack 'subscription' or 'recurring' billing"
+        },
+        {
+          "id": "a015-10",
+          "description": "Waitlist for full classes",
+          "check": "Section 3 contains 'waitlist_entries' for full class sessions"
+        },
+        {
+          "id": "a015-11",
+          "description": "NGN amounts in Section 9 (real membership prices)",
+          "check": "Section 9 contains specific NGN amounts (₦) for membership tiers or class pack prices"
+        },
+        {
+          "id": "a015-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-016",
+      "name": "Vehicle rental marketplace (Ghana and Kenya)",
+      "prompt": "Design a multi-country vehicle rental marketplace called DriveEase for Ghana and Kenya. Fleet operators list cars and trucks for daily or weekly rental. Renters browse, book, and pay a 40% deposit via MTN Mobile Money (Ghana) or M-Pesa (Kenya). A security deposit equal to the daily rate is held separately and refunded on clean return. Damaged or late returns trigger a partial deduction. Fleet managers see cross-fleet analytics. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a016-01",
+          "description": "MTN Mobile Money for Ghana (GHS) and M-Pesa for Kenya (KES)",
+          "check": "output contains 'MTN' and ('M-Pesa' or 'Mpesa') in Sections 2, 3, or 8"
+        },
+        {
+          "id": "a016-02",
+          "description": "Day-based conflict prevention using daterange EXCLUDE USING gist",
+          "check": "Section 3 contains 'daterange' or 'EXCLUDE USING gist' for rental date conflict prevention"
+        },
+        {
+          "id": "a016-03",
+          "description": "Two-part payment: rental deposit + security deposit",
+          "check": "Section 3 contains 'security_deposit' or 'deposit_status' or 'deposit_deduction' column"
+        },
+        {
+          "id": "a016-04",
+          "description": "Multi-currency schema supporting both GHS and KES",
+          "check": "Section 3 or Section 8 contains 'GHS' and 'KES' as distinct currency values"
+        },
+        {
+          "id": "a016-05",
+          "description": "Webhook HMAC verification for MTN Mobile Money and M-Pesa callbacks",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-callback-signature' or 'x-mpesa-signature'"
+        },
+        {
+          "id": "a016-06",
+          "description": "Vehicle condition tracking for damage assessment",
+          "check": "Section 3 or Section 4 contains 'condition' or 'damage' or 'inspection' records for vehicles"
+        },
+        {
+          "id": "a016-07",
+          "description": "Fleet analytics or KPI dashboard for fleet managers",
+          "check": "Section 3 or Section 5 contains 'fleet_kpis' or 'branch_kpis' or fleet analytics view"
+        },
+        {
+          "id": "a016-08",
+          "description": "Idempotency guard on payment webhooks",
+          "check": "Section 3 or Section 4 or Section 7 contains 'idempotency_key' or 'idempotent'"
+        },
+        {
+          "id": "a016-09",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns"]
+        },
+        {
+          "id": "a016-10",
+          "description": "GHS and KES real amounts in Section 9",
+          "check": "Section 9 contains at least one specific GHS or KES amount for fees or commissions"
+        },
+        {
+          "id": "a016-11",
+          "description": "Assumptions block with Ghana and Kenya context",
+          "check": "output contains '## Assumptions Made' and mentions Ghana and Kenya"
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 14 cases pass. Target: 14 cases, 137 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 16 cases pass. Target: 16 cases, 160 assertions."
   }
 }

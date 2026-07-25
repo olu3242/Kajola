@@ -116,6 +116,27 @@ What's inside:
 
 ---
 
+### `fitbook-gym-nigeria.md`
+**Prompt**: "Design a multi-tenant gym and fitness class booking platform for Nigeria called FitBook. Members book group fitness classes (yoga, HIIT, spin) or one-on-one personal training sessions. Monthly membership subscriptions via Paystack Recurring. Drop-in class packs sold separately. QR code check-ins at the gym door. Trainers set their own weekly schedules. Loyalty points per class attended. No-show policy after 3 missed classes. Full system architecture."
+
+**Market**: Nigeria · **Currency**: NGN · **Payments**: Paystack (one-time + Recurring subscriptions) · **Auth**: Phone OTP (Termii) · **SORF**: Full lifecycle including class + PT models
+
+What's inside:
+- PRD with 3 personas (member Tunde, trainer Coach Adaeze, gym owner Bisi) and 16 features (P0/P1/P2)
+- Dual booking model: group class capacity (`class_enrollments` with atomic `FOR UPDATE` count check) + 1:1 PT sessions (`bookings` with EXCLUDE USING gist)
+- Full Postgres schema — 22 tables: `class_types`, `class_sessions` (EXCLUDE gist on trainer schedule), `class_enrollments` (capacity enforcement), `memberships` with `paystack_sub_code`, `check_ins`, `member_profiles.check_in_code` UUID for QR
+- SORF 9-state `booking_status` enum on PT `bookings`; `enrolled_count + max_capacity` pattern on `class_sessions`
+- `availability_windows` + `availability_overrides` for trainer schedules; `waitlist_entries` with cancellation trigger
+- `loyalty_accounts` + `loyalty_transactions` (idempotent per enrollment); `branch_kpis` materialised view
+- 13 API endpoints: phone OTP, search-classes (PostGIS, filters), book-class (atomic capacity), book-pt-slot (SORF held), Paystack webhook (HMAC), QR check-in, subscription webhook, loyalty balance, cancel-enrollment
+- Paystack Recurring (plan + subscription code): monthly membership auto-charge with `paystack_sub_code` stored on `memberships`
+- `check_class_capacity()` trigger with `FOR UPDATE` row lock prevents concurrent over-enrollment
+- 9 pg_cron jobs including PT hold expiry, no-show check, class reminders, membership renewal reminders, branch KPI refresh, AI churn scoring
+- Monetization in NGN: Drop-in ₦3,500, 10-class pack ₦22,000, unlimited monthly ₦15,000, PT ₦10,000–₦25,000; 8% platform fee; projections to ₦12.4M MRR
+- Quarterly roadmap: Q1 2027 Lagos launch → Q2 loyalty + class packs → Q3 AI scheduling → Q4 Abuja/PH expansion
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:

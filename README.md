@@ -128,9 +128,14 @@ kajola/
 │   ├── output-template.md          # Structured output template for all 11 sections
 │   └── api-patterns.md             # Edge Function patterns: HMAC, M-Pesa, AT SMS, offline queue
 ├── evals/
-│   └── evals.json                  # 14 test cases, 137 assertions
+│   └── evals.json                  # 16 test cases, 160 assertions
 ├── supabase/
-│   └── migrations/                 # Reference migrations (SORF baseline schema)
+│   ├── migrations/                 # Reference migrations (SORF baseline schema)
+│   └── functions/
+│       └── book-slot/index.ts      # SORF hold-state Edge Function reference implementation
+├── scripts/
+│   ├── check-example.sh            # SORF compliance validator for individual example files (50 checks)
+│   └── validate-skill.sh           # Full skill structure validator
 └── examples/
     ├── README.md                   # Examples index
     ├── kajola-artisan-platform.md  # Artisan booking marketplace — Nigeria (Paystack + Termii)
@@ -138,7 +143,8 @@ kajola/
     ├── boda-connect-kenya.md       # Boda-boda dispatch — Kenya (M-Pesa + Africa's Talking + USSD)
     ├── parcelrun-ghana-ci.md       # Micro-logistics — Ghana + Côte d'Ivoire (MTN + Orange Money, bilingual)
     ├── glamplus-beauty-kenya.md    # Beauty salon chain — Kenya (M-Pesa deposit + SORF + loyalty + waitlist)
-    └── medconnect-telemedicine-nigeria.md  # Telemedicine platform — Nigeria (Paystack + Termii + Whereby)
+    ├── medconnect-telemedicine-nigeria.md  # Telemedicine platform — Nigeria (Paystack + Termii + Whereby)
+    └── fitbook-gym-nigeria.md      # Gym + fitness class booking — Nigeria (Paystack Recurring + QR check-in)
 ```
 
 ---
