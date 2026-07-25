@@ -414,6 +414,304 @@ CREATE INDEX [table]_name_trgm_idx ON [table] USING GIN (name gin_trgm_ops);
 
 ---
 
+## Staff Availability & Scheduling Pattern
+
+Separates the recurring weekly template (`availability_windows`) from one-off overrides (`availability_overrides`). Availability is always computed from the DB, never from application code.
+
+```sql
+-- Recurring weekly schedule per staff per branch
+CREATE TABLE availability_windows (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES tenants(id),
+  branch_id     uuid NOT NULL REFERENCES branches(id),
+  staff_id      uuid NOT NULL REFERENCES staff(id),
+  day_of_week   smallint NOT NULL CHECK (day_of_week BETWEEN 0 AND 6), -- 0=Sun, 6=Sat
+  start_time    time NOT NULL,
+  end_time      time NOT NULL,
+  is_active     boolean NOT NULL DEFAULT true,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  CHECK (end_time > start_time),
+  UNIQUE (staff_id, branch_id, day_of_week, start_time)
+);
+
+-- One-off overrides: extra availability or blocks (holiday, sickness, training)
+CREATE TABLE availability_overrides (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES tenants(id),
+  staff_id      uuid NOT NULL REFERENCES staff(id),
+  branch_id     uuid REFERENCES branches(id),
+  override_type text NOT NULL CHECK (override_type IN ('available','blocked')),
+  starts_at     timestamptz NOT NULL,
+  ends_at       timestamptz NOT NULL,
+  reason        text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  CHECK (ends_at > starts_at)
+);
+
+CREATE INDEX idx_avail_windows_staff     ON availability_windows (staff_id, day_of_week) WHERE is_active;
+CREATE INDEX idx_avail_overrides_staff   ON availability_overrides (staff_id, starts_at, ends_at);
+```
+
+---
+
+## Appointment Booking Pattern (SORF-compliant)
+
+Booking lifecycle: `pending` → `confirmed` → `checked_in` → `in_progress` → `completed` | `cancelled` | `no_show` | `disputed`
+
+```sql
+CREATE TYPE booking_status AS ENUM (
+  'pending','confirmed','held',
+  'checked_in','in_progress',
+  'completed','cancelled','no_show','disputed'
+);
+
+CREATE TABLE bookings (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id        uuid NOT NULL REFERENCES tenants(id),
+  branch_id        uuid NOT NULL REFERENCES branches(id),
+  staff_id         uuid NOT NULL REFERENCES staff(id),
+  service_id       uuid NOT NULL REFERENCES services(id),
+  customer_id      uuid NOT NULL REFERENCES customers(id),
+  status           booking_status NOT NULL DEFAULT 'pending',
+  starts_at        timestamptz NOT NULL,
+  ends_at          timestamptz NOT NULL,
+  duration_minutes integer NOT NULL,
+  -- Payment
+  total_amount     integer NOT NULL,          -- minor units
+  deposit_amount   integer NOT NULL DEFAULT 0,
+  deposit_paid     boolean NOT NULL DEFAULT false,
+  payment_status   text NOT NULL DEFAULT 'pending'
+                   CHECK (payment_status IN ('pending','deposit_paid','paid','refunded','partial_refund')),
+  -- SORF tracking
+  held_until       timestamptz,              -- optimistic hold expiry (15 min)
+  checked_in_at    timestamptz,
+  started_at       timestamptz,
+  completed_at     timestamptz,
+  cancelled_at     timestamptz,
+  cancellation_reason text,
+  no_show_at       timestamptz,
+  -- Recurrence
+  recurrence_rule  text,                     -- RRULE string for recurring bookings
+  parent_booking_id uuid REFERENCES bookings(id),
+  -- Notes
+  customer_notes   text,
+  staff_notes      text,
+  internal_notes   text,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  CHECK (ends_at > starts_at)
+);
+
+-- SORF slot conflict prevention: scoped to (staff_id, branch_id)
+-- Only active bookings block slots — cancelled/no_show free the slot
+CREATE EXTENSION IF NOT EXISTS "btree_gist";
+
+ALTER TABLE bookings
+  ADD CONSTRAINT no_staff_double_booking
+  EXCLUDE USING gist (
+    staff_id WITH =,
+    branch_id WITH =,
+    tstzrange(starts_at, ends_at, '[)') WITH &&
+  )
+  WHERE (status NOT IN ('cancelled', 'no_show', 'disputed'));
+
+CREATE INDEX idx_bookings_staff_time    ON bookings (staff_id, starts_at, ends_at);
+CREATE INDEX idx_bookings_customer      ON bookings (customer_id, created_at DESC);
+CREATE INDEX idx_bookings_branch_status ON bookings (branch_id, status, starts_at);
+CREATE INDEX idx_bookings_held          ON bookings (held_until) WHERE status = 'held';
+
+SELECT update_updated_at('bookings');
+
+-- Release expired held slots every minute
+SELECT cron.schedule('release-held-slots', '* * * * *', $$
+  UPDATE bookings SET status = 'cancelled', cancellation_reason = 'hold_expired'
+  WHERE status = 'held' AND held_until < now();
+$$);
+```
+
+---
+
+## Loyalty & Membership Pattern
+
+```sql
+CREATE TYPE loyalty_event_type AS ENUM (
+  'points_earned','points_redeemed','points_expired',
+  'tier_upgrade','tier_downgrade','membership_activated','membership_renewed'
+);
+
+CREATE TABLE loyalty_accounts (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      uuid NOT NULL REFERENCES tenants(id),
+  customer_id    uuid NOT NULL REFERENCES customers(id),
+  points_balance integer NOT NULL DEFAULT 0 CHECK (points_balance >= 0),
+  lifetime_points integer NOT NULL DEFAULT 0,
+  tier           text NOT NULL DEFAULT 'bronze'
+                 CHECK (tier IN ('bronze','silver','gold','platinum')),
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, customer_id)
+);
+
+CREATE TABLE loyalty_transactions (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      uuid NOT NULL REFERENCES tenants(id),
+  account_id     uuid NOT NULL REFERENCES loyalty_accounts(id),
+  booking_id     uuid REFERENCES bookings(id),
+  event_type     loyalty_event_type NOT NULL,
+  points_delta   integer NOT NULL,            -- positive = earned, negative = redeemed
+  balance_after  integer NOT NULL,
+  expires_at     timestamptz,                 -- null = no expiry
+  description    text NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE memberships (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id        uuid NOT NULL REFERENCES tenants(id),
+  customer_id      uuid NOT NULL REFERENCES customers(id),
+  plan_id          uuid NOT NULL REFERENCES membership_plans(id),
+  status           text NOT NULL DEFAULT 'active'
+                   CHECK (status IN ('active','paused','cancelled','expired')),
+  starts_at        date NOT NULL,
+  renews_at        date,
+  ends_at          date,
+  sessions_total   integer,                   -- null = unlimited
+  sessions_used    integer NOT NULL DEFAULT 0,
+  amount_per_cycle integer NOT NULL,
+  currency         text NOT NULL DEFAULT 'NGN',
+  payment_ref      text,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_loyalty_customer ON loyalty_accounts (tenant_id, customer_id);
+CREATE INDEX idx_loyalty_txn      ON loyalty_transactions (account_id, created_at DESC);
+CREATE INDEX idx_memberships_renew ON memberships (renews_at) WHERE status = 'active';
+
+SELECT update_updated_at('loyalty_accounts');
+SELECT update_updated_at('memberships');
+```
+
+---
+
+## Branch / Franchise Multi-Location Pattern
+
+```sql
+-- Business hierarchy: tenant → business → branches → staff
+CREATE TABLE businesses (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id        uuid NOT NULL REFERENCES tenants(id),
+  name             text NOT NULL,
+  slug             text NOT NULL,
+  category         text NOT NULL,             -- 'beauty', 'wellness', 'healthcare', 'home_services'
+  is_franchise     boolean NOT NULL DEFAULT false,
+  deposit_policy   jsonb NOT NULL DEFAULT '{"type": "percentage", "value": 30}'::jsonb,
+  cancellation_policy jsonb NOT NULL DEFAULT '{"hours_notice": 24, "fee_pct": 0}'::jsonb,
+  no_show_policy   jsonb NOT NULL DEFAULT '{"max_no_shows": 3, "require_prepayment": true}'::jsonb,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, slug)
+);
+
+CREATE TABLE branches (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id        uuid NOT NULL REFERENCES tenants(id),
+  business_id      uuid NOT NULL REFERENCES businesses(id),
+  name             text NOT NULL,
+  address          text NOT NULL,
+  location         geography(POINT, 4326),
+  phone            text,
+  timezone         text NOT NULL DEFAULT 'Africa/Lagos',
+  is_active        boolean NOT NULL DEFAULT true,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE franchise_owners (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id    uuid NOT NULL REFERENCES tenants(id),
+  user_id      uuid NOT NULL REFERENCES auth.users(id),
+  business_id  uuid NOT NULL REFERENCES businesses(id),
+  royalty_pct  numeric(5,2) NOT NULL DEFAULT 5.00,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- Materialised view: per-branch KPIs refreshed every 15 minutes
+CREATE MATERIALIZED VIEW branch_kpis AS
+SELECT
+  b.id                                                AS branch_id,
+  b.name                                             AS branch_name,
+  count(bk.id)                                       AS total_bookings_30d,
+  count(bk.id) FILTER (WHERE bk.status = 'completed') AS completed_bookings_30d,
+  count(bk.id) FILTER (WHERE bk.status = 'no_show')   AS no_shows_30d,
+  sum(bk.total_amount) FILTER (WHERE bk.status = 'completed') AS gmv_30d,
+  round(avg(r.score)::numeric, 2)                    AS avg_rating
+FROM branches b
+LEFT JOIN bookings bk ON bk.branch_id = b.id
+  AND bk.created_at >= now() - interval '30 days'
+LEFT JOIN reviews r ON r.branch_id = b.id
+  AND r.created_at >= now() - interval '30 days'
+GROUP BY b.id, b.name;
+
+CREATE UNIQUE INDEX idx_branch_kpis_id ON branch_kpis (branch_id);
+
+SELECT cron.schedule('refresh-branch-kpis', '*/15 * * * *', $$
+  REFRESH MATERIALIZED VIEW CONCURRENTLY branch_kpis;
+$$);
+```
+
+---
+
+## Waitlist Pattern
+
+```sql
+CREATE TABLE waitlist_entries (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  branch_id       uuid NOT NULL REFERENCES branches(id),
+  staff_id        uuid REFERENCES staff(id),     -- null = any staff
+  service_id      uuid NOT NULL REFERENCES services(id),
+  customer_id     uuid NOT NULL REFERENCES customers(id),
+  preferred_dates date[],                         -- null = any date
+  preferred_times tstzrange[],                    -- null = any time
+  status          text NOT NULL DEFAULT 'waiting'
+                  CHECK (status IN ('waiting','notified','booked','expired','cancelled')),
+  notified_at     timestamptz,
+  expires_at      timestamptz NOT NULL DEFAULT now() + interval '7 days',
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_waitlist_branch_service ON waitlist_entries (branch_id, service_id)
+  WHERE status = 'waiting';
+
+-- When a booking is cancelled, trigger waitlist notification
+CREATE OR REPLACE FUNCTION notify_waitlist_on_cancellation()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.status IN ('cancelled', 'no_show') AND OLD.status NOT IN ('cancelled', 'no_show') THEN
+    -- Mark matching waitlist entries as 'notified' (Edge Function handles actual SMS)
+    UPDATE waitlist_entries
+    SET status = 'notified', notified_at = now()
+    WHERE branch_id  = NEW.branch_id
+      AND service_id = NEW.service_id
+      AND status     = 'waiting'
+      AND (staff_id IS NULL OR staff_id = NEW.staff_id)
+      AND expires_at  > now()
+    ORDER BY created_at ASC   -- FIFO: earliest waitlist entry gets first notification
+    LIMIT 3;                  -- notify top 3 in case first doesn't respond
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER on_booking_cancelled_notify_waitlist
+  AFTER UPDATE ON bookings
+  FOR EACH ROW EXECUTE FUNCTION notify_waitlist_on_cancellation();
+```
+
+---
+
 ## Mobile Money Transaction Pattern
 
 Universal table for M-Pesa, MTN Mobile Money, Orange Money, and Flutterwave. Covers both C2B (customer pays) and B2C/B2B (platform pays out).
