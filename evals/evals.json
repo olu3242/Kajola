@@ -1339,11 +1339,147 @@
           "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
         }
       ]
+    },
+    {
+      "id": "eval-023",
+      "name": "Laundry pickup & delivery SaaS (Nigeria)",
+      "prompt": "Build CleanRun — a laundry pickup and delivery platform for Nigeria. Customers schedule pickups. Riders collect garments, laundromats process them, delivery returns clean clothes. Weight-based pricing with Paystack + Termii SMS + GPS rider tracking + before/after condition photos.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a023-01",
+          "description": "SORF booking status enum all 9 states",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a023-02",
+          "description": "gps_pings append-only table for rider tracking",
+          "check": "Section 3 contains 'gps_pings' table with append-only guard trigger"
+        },
+        {
+          "id": "a023-03",
+          "description": "job_photos table for before/after condition evidence",
+          "check": "Section 3 contains 'job_photos' table with 'photo_type' for before/after laundry condition"
+        },
+        {
+          "id": "a023-04",
+          "description": "pricing_rules table for weight-based pricing",
+          "check": "Section 3 contains 'pricing_rules' or weight-based pricing with 'price_per_kg' or 'weight_kg'"
+        },
+        {
+          "id": "a023-05",
+          "description": "EXCLUDE USING gist prevents double-booking of riders",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for rider slot conflict prevention"
+        },
+        {
+          "id": "a023-06",
+          "description": "availability_windows for rider schedules",
+          "check": "Section 3 contains 'availability_windows' for rider or staff scheduling"
+        },
+        {
+          "id": "a023-07",
+          "description": "held_until for 15-minute slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a023-08",
+          "description": "Paystack HMAC webhook verification",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a023-09",
+          "description": "branch_kpis materialised view",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a023-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and TERMII_API_KEY in env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and 'TERMII_API_KEY'"
+        },
+        {
+          "id": "a023-11",
+          "description": "Real NGN weight-based pricing in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) per kg or per item for laundry tiers"
+        },
+        {
+          "id": "a023-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-024",
+      "name": "Pet grooming and veterinary booking (Nigeria)",
+      "prompt": "Design PawPerfect — a pet grooming and veterinary appointment booking platform for Nigeria. Pet owners schedule grooming sessions or vet consultations for dogs and cats. Groomers and vets have individual schedules. Paystack payments, Termii SMS, multi-branch (Lagos + Abuja). Include vaccine records and pet health profiles.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a024-01",
+          "description": "SORF booking status enum all 9 states",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a024-02",
+          "description": "Pet profiles table with species and breed",
+          "check": "Section 3 contains 'pet_profiles' or 'pets' table with 'species' or 'breed' or 'owner_id'"
+        },
+        {
+          "id": "a024-03",
+          "description": "Vaccine or health records table",
+          "check": "Section 3 contains 'vaccine' or 'health_record' or 'vaccination' table or column"
+        },
+        {
+          "id": "a024-04",
+          "description": "EXCLUDE USING gist prevents double-booking of groomer or vet",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for staff slot conflict prevention"
+        },
+        {
+          "id": "a024-05",
+          "description": "availability_windows for groomer and vet schedules",
+          "check": "Section 3 contains 'availability_windows' for staff scheduling"
+        },
+        {
+          "id": "a024-06",
+          "description": "held_until for 15-minute slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a024-07",
+          "description": "Paystack HMAC webhook verification",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a024-08",
+          "description": "waitlist_entries and notify_waitlist trigger",
+          "check": "Section 3 contains 'waitlist_entries' and 'notify_waitlist'"
+        },
+        {
+          "id": "a024-09",
+          "description": "branch_kpis materialised view for multi-branch dashboard",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a024-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and TERMII_API_KEY in env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and 'TERMII_API_KEY'"
+        },
+        {
+          "id": "a024-11",
+          "description": "Real NGN service pricing in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) for grooming or vet consultation fees"
+        },
+        {
+          "id": "a024-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 22 cases pass. Target: 22 cases, 231 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 24 cases pass. Target: 24 cases, 255 assertions."
   }
 }

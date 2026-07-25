@@ -835,3 +835,232 @@ async function cancelPaystackSubscription(params: {
 ```
 
 Required env vars: `PAYSTACK_SECRET_KEY`
+
+---
+
+## Flutterwave Payments (Pan-Africa)
+
+Use Flutterwave for multi-currency collections across Ghana (GHS), Kenya (KES), Rwanda (RWF), Uganda (UGX), Tanzania (TZS), and South Africa (ZAR). Flutterwave is the default payment provider for non-Nigeria markets where Paystack is unavailable.
+
+### Initiate Flutterwave Payment
+
+```typescript
+interface FlutterwaveChargeParams {
+  txRef: string;           // unique idempotency key
+  amount: number;          // in the base currency unit (not kobo)
+  currency: string;        // 'GHS' | 'KES' | 'RWF' | 'UGX' | 'NGN' | etc.
+  customerEmail: string;
+  customerPhone: string;
+  customerName: string;
+  redirectUrl: string;     // where to send customer after payment
+  meta?: Record<string, unknown>;
+}
+
+async function initiateFlutterwavePayment(
+  params: FlutterwaveChargeParams
+): Promise<{ paymentLink: string; txRef: string }> {
+  const res = await fetch("https://api.flutterwave.com/v3/payments", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${Deno.env.get("FLW_SECRET_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      tx_ref: params.txRef,
+      amount: params.amount,
+      currency: params.currency,
+      redirect_url: params.redirectUrl,
+      customer: {
+        email: params.customerEmail,
+        phone_number: params.customerPhone,
+        name: params.customerName,
+      },
+      meta: params.meta ?? {},
+      customizations: {
+        title: "CleanRun Payment",
+        logo: "https://cleanrun.app/logo.png",
+      },
+    }),
+  });
+  const data = await res.json();
+  if (data.status !== "success") {
+    throw new Error(`Flutterwave init failed: ${data.message}`);
+  }
+  return { paymentLink: data.data.link, txRef: params.txRef };
+}
+```
+
+### Verify Flutterwave Payment (webhook)
+
+```typescript
+interface FlutterwaveWebhookPayload {
+  event: string;
+  data: {
+    id: number;
+    tx_ref: string;
+    flw_ref: string;
+    amount: number;
+    currency: string;
+    status: "successful" | "failed" | "pending";
+    payment_type: string;
+    customer: { email: string; phone_number: string; name: string };
+    meta: Record<string, unknown>;
+  };
+}
+
+async function verifyFlutterwaveWebhook(req: Request): Promise<boolean> {
+  const secretHash = Deno.env.get("FLW_WEBHOOK_HASH")!;
+  const signature = req.headers.get("verif-hash") ?? "";
+  return signature === secretHash;
+}
+
+// Verify actual transaction status via API (don't trust webhook amount alone)
+async function verifyFlutterwaveTransaction(
+  transactionId: number
+): Promise<{ status: string; amount: number; currency: string }> {
+  const res = await fetch(
+    `https://api.flutterwave.com/v3/transactions/${transactionId}/verify`,
+    {
+      headers: { Authorization: `Bearer ${Deno.env.get("FLW_SECRET_KEY")}` },
+    }
+  );
+  const data = await res.json();
+  return {
+    status: data.data.status,
+    amount: data.data.amount,
+    currency: data.data.currency,
+  };
+}
+```
+
+### Flutterwave Transfer (provider payout)
+
+```typescript
+async function initiateFlutterwaveTransfer(params: {
+  accountNumber: string;
+  accountBank: string;    // bank code, e.g. '044' for Access Bank Nigeria
+  amount: number;
+  currency: string;
+  narration: string;
+  reference: string;      // unique idempotency key
+}): Promise<{ transferId: number; status: string }> {
+  const res = await fetch("https://api.flutterwave.com/v3/transfers", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${Deno.env.get("FLW_SECRET_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      account_bank: params.accountBank,
+      account_number: params.accountNumber,
+      amount: params.amount,
+      currency: params.currency,
+      narration: params.narration,
+      reference: params.reference,
+    }),
+  });
+  const data = await res.json();
+  if (data.status !== "success") {
+    throw new Error(`Transfer failed: ${data.message}`);
+  }
+  return { transferId: data.data.id, status: data.data.status };
+}
+```
+
+Required env vars: `FLW_SECRET_KEY`, `FLW_WEBHOOK_HASH`
+
+---
+
+## Whereby Embedded (Telemedicine Video Rooms)
+
+Use Whereby Embedded for in-platform video consultations on telemedicine platforms. Create a room per booking on `booking.confirmed`; embed in Expo WebView (patient) and Next.js iframe (doctor).
+
+### Create Whereby Room
+
+```typescript
+interface WherebyRoomParams {
+  meetingName: string;          // human-readable: "Dr Adeyemi × Emeka Okonkwo"
+  bookingId: string;            // used as endSessionCallback reference
+  startTime: string;            // ISO 8601 — room unlocks 10 min before
+  endTime: string;              // ISO 8601 — room locks 10 min after
+  roomMode?: "normal" | "group" // default 'normal' for 1:1 consultations
+}
+
+interface WherebyRoom {
+  meetingId: string;
+  roomUrl: string;         // share with patient (host=false URL)
+  hostRoomUrl: string;     // share with doctor (host=true URL includes host token)
+  startDate: string;
+  endDate: string;
+}
+
+async function createWherebyRoom(params: WherebyRoomParams): Promise<WherebyRoom> {
+  const res = await fetch("https://api.whereby.dev/v1/meetings", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${Deno.env.get("WHEREBY_API_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      endDate: params.endTime,
+      fields: ["hostRoomUrl"],
+      roomMode: params.roomMode ?? "normal",
+      roomNamePrefix: `booking-${params.bookingId}`,
+      startDate: params.startTime,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Whereby create room failed: ${err}`);
+  }
+  const data = await res.json();
+  return {
+    meetingId: data.meetingId,
+    roomUrl: data.roomUrl,
+    hostRoomUrl: data.hostRoomUrl,
+    startDate: data.startDate,
+    endDate: data.endDate,
+  };
+}
+```
+
+### Delete Whereby Room (on booking cancellation)
+
+```typescript
+async function deleteWherebyRoom(meetingId: string): Promise<void> {
+  await fetch(`https://api.whereby.dev/v1/meetings/${meetingId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${Deno.env.get("WHEREBY_API_KEY")}` },
+  });
+}
+```
+
+### Store room URLs on booking
+
+```sql
+-- Add to bookings table for telemedicine platforms
+ALTER TABLE bookings
+  ADD COLUMN whereby_meeting_id text,
+  ADD COLUMN whereby_room_url    text,    -- patient URL (embed in Expo WebView)
+  ADD COLUMN whereby_host_url    text;    -- doctor URL (embed in Next.js iframe)
+```
+
+### Expo WebView embed (patient)
+
+```tsx
+import { WebView } from 'react-native-webview'
+
+export function VideoConsultation({ roomUrl }: { roomUrl: string }) {
+  return (
+    <WebView
+      source={{ uri: roomUrl }}
+      mediaPlaybackRequiresUserAction={false}
+      allowsInlineMediaPlayback
+      javaScriptEnabled
+      style={{ flex: 1 }}
+    />
+  )
+}
+```
+
+Required env vars: `WHEREBY_API_KEY`

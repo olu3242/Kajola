@@ -265,6 +265,28 @@ Special rules:
 - M-Pesa B2C for rider/courier payouts; **never** use C2B for outbound disbursements
 - Bilingual SMS templates are required for multi-country logistics platforms
 
+### Laundry & Pickup-Delivery
+**When to apply**: laundry-as-a-service, dry cleaning pickup, laundromat SaaS, tailoring pickup, any "collect → process → return" service vertical.
+
+Key differences from standard appointment booking:
+- Bookings span two separate events (pickup and delivery) — model as a single `booking` row with both `pickup_address` and `delivery_address`; the same rider may handle both or different riders assigned via `rider_id` vs `delivery_rider_id`
+- Pricing is **weight-based** or **per-item**, not duration-based — store `weight_kg_estimated` at booking and `weight_kg_actual` after rider weigh-in; recalculate total and send balance payment link via SMS
+- Deposit pattern: collect 50% at booking (configurable via `deposit_policy` jsonb on `branches`); send Paystack balance-payment link after weigh-in confirms actual weight
+- `EXCLUDE USING gist` on `(rider_id, branch_id, tstzrange)` prevents double-booking of riders for pickup slots; constraint should be conditional on `rider_id IS NOT NULL` since riders are assigned after booking
+
+Additional tables:
+- `pricing_rules`: `service_tier service_tier`, `price_per_kg numeric(10,2)`, `price_per_item numeric(10,2)`, `min_charge_ngn numeric(10,2)` — weight pricing server-side only, never client-side
+- `job_photos`: same schema as Home Services — `photo_type` enum includes `'before'|'after'|'damage'`; private Storage bucket, signed URLs only
+- `gps_pings`: same append-only schema as Home Services — rider pings every 10s during pickup and delivery; `latest_gps_pings` view for dispatch map
+- `booking_items`: optional line-item detail for multi-garment orders (`description`, `quantity`, `weight_kg`, `unit_price`)
+
+Special rules:
+- Weight is entered by rider on pickup — expose a `POST /weigh-in` endpoint that updates `weight_kg_actual` and triggers a balance payment SMS (Paystack link)
+- GPS append-only: same guard triggers as Home Services (`guard_gps_ping_timestamp`, `deny_gps_ping_mutation`)
+- Storage bucket for job photos: **PRIVATE**; never return public URLs — always use signed URLs with 15-minute TTL
+- `automation_jobs` includes a `balance_payment_link` job triggered after weigh-in to send the final amount via Termii SMS
+- Rider ETA SMS: when GPS ping brings rider within 2km of pickup, fire `rider_eta_sms` automation job
+
 ---
 
 ## Output Format

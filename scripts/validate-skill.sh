@@ -150,6 +150,7 @@ assert_contains "SKILL.md" "Fitness.*Gym\|Gym.*Fitness\|Class-Based" "Fitness/Gy
 assert_contains "SKILL.md" "Home Services\|On-Demand Dispatch" "Home Services vertical pattern present"
 assert_contains "SKILL.md" "Equipment.*Rental\|Vehicle Rental"  "Equipment/Vehicle Rental vertical pattern present"
 assert_contains "SKILL.md" "Logistics.*Delivery\|Delivery Dispatch" "Logistics/Delivery vertical pattern present"
+assert_contains "SKILL.md" "Laundry.*Pickup\|Pickup-Delivery\|laundry-as-a-service" "Laundry/Pickup-Delivery vertical pattern present"
 
 echo ""
 echo "[ SORF — Booking Engine checks ]"
@@ -181,6 +182,8 @@ assert_contains "references/api-patterns.md" "flushQueue\|offline.*queue\|expo-s
 assert_contains "references/api-patterns.md" "MTN\|MoMo\|momodeveloper"     "MTN MoMo pattern in api-patterns.md"
 assert_contains "references/api-patterns.md" "Termii\|sendTermiiOtp\|verifyTermiiOtp" "Termii OTP pattern in api-patterns.md"
 assert_contains "references/api-patterns.md" "Paystack.*Recurring\|createPaystackPlan\|subscribeCustomer\|paystack_sub_code" "Paystack Recurring pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "Flutterwave\|FLW_SECRET_KEY\|flutterwave" "Flutterwave payment pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "Whereby\|WHEREBY_API_KEY\|whereby" "Whereby video room pattern in api-patterns.md"
 
 echo ""
 echo "[ SORF — SQL patterns checks (extended) ]"
@@ -217,10 +220,10 @@ fi
 
 # At least 14 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 20 ]]; then
-  check "evals.json has at least 20 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 22 ]]; then
+  check "evals.json has at least 22 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 20 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 22 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -242,10 +245,10 @@ import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 220 ]]; then
-  check "evals.json has at least 220 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 240 ]]; then
+  check "evals.json has at least 240 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 220 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 240 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present

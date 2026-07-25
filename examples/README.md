@@ -193,6 +193,23 @@ What's inside:
 
 ---
 
+### [`cleanrun-laundry-nigeria.md`](./cleanrun-laundry-nigeria.md)
+
+**Markets**: Nigeria (NGN) · **Payments**: Paystack (card + bank transfer + USSD) · **Auth**: Phone OTP (Termii) · **Vertical**: Laundry pickup & delivery SaaS
+
+What's inside:
+- GPS rider tracking: `gps_pings` append-only table; `guard_gps_ping_timestamp` trigger rejects future timestamps > 30s; `deny_gps_ping_mutation` triggers block UPDATE/DELETE; `latest_gps_pings` view for dispatch map; Supabase Realtime broadcasts on `gps:booking:{id}` channel
+- Before/after condition photos: `job_photos` table with `photo_type` enum (before/after/damage); private Storage bucket `job-photos`; signed URLs with 15-minute TTL served via Edge Function
+- Weight-based pricing: `pricing_rules` table with `price_per_kg` and `price_per_item`; deposit collected at booking (50% via `deposit_policy` jsonb); balance payment link sent via Termii SMS after rider weigh-in
+- Dual-rider model: `bookings.rider_id` (pickup) and `bookings.delivery_rider_id` (delivery); `EXCLUDE USING gist` conditional on `rider_id IS NOT NULL` to support unassigned bookings
+- `pg_cron` job archives GPS pings older than 30 days to prevent table bloat
+- `notify_waitlist()` trigger + `track_customer_no_show()` trigger for 2-strike no-show policy
+- Full `automation_jobs` suite: pickup reminders (24h + 2h), rider ETA SMS, ready-for-delivery, delivery confirmation, balance payment link
+- 17 tables: all SORF invariants including `availability_windows`, `availability_overrides`, `waitlist_entries`, `loyalty_accounts`, `branch_kpis` matview
+- Monetization: ₦1,500/kg standard · ₦2,000/kg express · 10% platform commission · ₦25,000/month/branch SaaS; ₦4,150,000/month MRR at 10 branches
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:
