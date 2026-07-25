@@ -2,23 +2,29 @@
 
 This repo is a Claude Code skill. It contains no application code — only instruction files that Claude reads to generate system architecture packages.
 
+## What Kajola Is
+
+Kajola is Africa's Service Commerce & Appointment Operating System — a Claude skill that generates complete, production-ready architecture packages for booking and service platforms. Its core is the **Service Operations Reliability Framework (SORF)**: an 18-stage booking lifecycle (Discovery → Repeat Booking) that every generated platform implements end-to-end. The 9 Core Platform Engines (Booking, Business Operations, CRM, Payments, Marketplace, AI Operations, Franchise, Communications, Observability) are the conceptual pillars that shape what Kajola generates in Sections 3–7.
+
 ## How the Skill Works
 
-When Claude Code loads this skill, it reads `SKILL.md` as its instruction set. When a user describes a platform, Claude follows those instructions to generate a complete 11-section architecture document. The `references/` files are cited inline in `SKILL.md` — Claude draws on them for SQL patterns and output formatting.
+When Claude Code loads this skill, it reads `SKILL.md` as its instruction set. When a user describes a service commerce platform, Claude follows those instructions to generate a complete 11-section architecture document. The `references/` files are cited inline in `SKILL.md` — Claude draws on them for SQL patterns (including SORF booking tables, staff availability, loyalty, franchise) and output formatting.
 
 ## File Map
 
 ```
-SKILL.md                        Core instruction set. Start here.
-references/sql-patterns.md      Reusable Postgres patterns (MoMo transactions, USSD sessions, SMS logs, idempotency)
-references/output-template.md   Formatting guide for all 11 sections + market-specific variants + currency table
+SKILL.md                        Core instruction set (SORF lifecycle, 9 Platform Engines, Africa-first defaults). Start here.
+references/sql-patterns.md      Reusable Postgres patterns: SORF booking tables, staff availability, loyalty, franchise,
+                                MoMo transactions, USSD sessions, SMS logs, idempotency
+references/output-template.md   Formatting guide for all 11 sections + SORF enum/domain tables + market variants + currency table
 references/api-patterns.md      Edge Function patterns (HMAC, M-Pesa STK/B2C, Africa's Talking SMS+USSD, offline queue)
-evals/evals.json                Test cases — 8 scenarios, 67 assertions
+evals/evals.json                Test cases — 10 scenarios, 89 assertions
 examples/                       Full generated outputs (reference / demo)
   kajola-artisan-platform.md    Nigeria — Paystack + Termii
   toolhire-pro-nigeria.md       Nigeria — Paystack + equipment rental
   boda-connect-kenya.md         Kenya — M-Pesa Daraja + Africa's Talking + USSD
   parcelrun-ghana-ci.md         Ghana + Côte d'Ivoire — MTN MoMo + Orange Money + bilingual
+  glamplus-beauty-kenya.md      Kenya — M-Pesa deposit + SORF full lifecycle + loyalty + waitlist + franchise
 CONTRIBUTING.md                 Guide for community contributors
 ```
 
@@ -57,7 +63,7 @@ Evals are not automated yet. To manually evaluate the skill:
 2. Run each prompt from `evals/evals.json` → `cases[*].prompt`
 3. Check the output against the assertions in `cases[*].assertions`
 4. A case passes if ≥ 85% of its assertions pass
-5. The skill passes overall if all 8 cases pass
+5. The skill passes overall if all 10 cases pass
 
 Use `bash scripts/run-evals.sh` to print all prompts and assertions in a readable format.
 
@@ -66,7 +72,11 @@ Use `bash scripts/run-evals.sh` to print all prompts and assertions in a readabl
 Every update to `SKILL.md` must preserve these invariants:
 - Phone OTP remains the primary auth method (not email)
 - Every generated SQL table has RLS enabled
-- Booking conflict prevention is at DB level (trigger or exclusion constraint), not application level
+- Booking conflict prevention is at DB level (`EXCLUDE USING gist` on staff_id + branch_id), not application level
+- All 9 SORF booking states are present in every booking schema
+- Staff availability uses `availability_windows` + `availability_overrides`
+- Deposit policy, cancellation policy, and no-show policy stored as jsonb on `businesses`
+- Waitlist trigger fires on booking cancellation or no-show
 - No output section can produce placeholder text (TBD, TODO, X%, etc.)
 - The Assumptions block is always generated at the end of every output
 

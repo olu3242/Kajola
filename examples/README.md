@@ -75,6 +75,27 @@ What's inside:
 
 ---
 
+### `glamplus-beauty-kenya.md`
+**Prompt**: "Design a multi-tenant beauty salon booking platform for Nairobi, Kenya called GlamPlus. Customers book appointments with specific stylists, pay a 30% M-Pesa deposit to confirm, earn loyalty points, and join a waitlist if their preferred stylist is fully booked. Salon owners manage multiple branches and see real-time KPI dashboards. Full system architecture."
+
+**Market**: Kenya (Nairobi) · **Currency**: KES · **Payments**: M-Pesa Daraja C2B+B2C · **Auth**: Phone OTP (Africa's Talking) · **SORF**: All 18 stages
+
+What's inside:
+- PRD with 3 personas (customer Wanjiru, salon owner Amina, franchise owner David) and 15 features (P0/P1/P2)
+- SORF-annotated architecture: full 18-stage lifecycle documented in all 4 data flows
+- Full Postgres schema — 18 tables: SORF 9-state `booking_status` enum, `availability_windows` (recurring) + `availability_overrides` (one-off), `EXCLUDE USING gist` constraint on `(staff_id, branch_id)`, `waitlist_entries` with cancellation trigger, `loyalty_accounts` + `loyalty_transactions`, `memberships`, `branch_kpis` materialised view
+- `businesses.deposit_policy` + `cancellation_policy` + `no_show_policy` as jsonb with branch-level overrides
+- 14 API endpoints: hold slot, M-Pesa STK Push initiate, Daraja C2B webhook, check-in, start, complete, cancel, waitlist join, loyalty balance, branch KPIs
+- Next.js dashboard: SORF state machine UI, availability grid editor, cross-branch franchise KPI table
+- Expo app: slot picker, M-Pesa STK Push flow, loyalty tier progress bar, en-KE / sw-KE i18n
+- 9 pg_cron jobs including hold expiry (5 min), no-show check (5 min), 24h/2h reminders, AI scoring (22:00 EAT), nightly reconciliation
+- 16 automation events spanning full SORF lifecycle: `booking.held` → `booking.confirmed` → … → `ai.rebook_nudge`
+- Monetization: 5% platform fee, KES 4,500/month Pro, KES 6,000/month featured, franchise 3% GMV fee; projections to KES 15.8M/month at 1,200 branches
+- Scaling plan at 10k / 100k / 1M MAU with cost estimates in KES
+- Quarterly roadmap: Q1 SORF core, Q2 loyalty + franchise, Q3 AI operations, Q4 East Africa expansion
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:

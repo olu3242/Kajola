@@ -1,6 +1,6 @@
 {
   "skill": "production-platform-architect",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Evaluation cases for the Kajola skill. Each case defines a prompt, required sections, and specific assertions that must hold in the generated output.",
   "cases": [
     {
@@ -407,11 +407,137 @@
           "check": "output contains '## Assumptions Made' and mentions Ghana and Côte d'Ivoire or Abidjan"
         }
       ]
+    },
+    {
+      "id": "eval-009",
+      "name": "Multi-staff beauty salon with SORF lifecycle and loyalty (Kenya)",
+      "prompt": "Design a multi-tenant beauty salon booking platform for Nairobi, Kenya called GlamPlus. Customers book appointments with specific stylists, pay a 30% M-Pesa deposit to confirm, earn loyalty points, and join a waitlist if their preferred stylist is fully booked. Salon owners manage multiple branches and see real-time KPI dashboards. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a009-01",
+          "description": "SORF 9-state booking_status enum present",
+          "check": "Section 3 contains booking_status enum with at least: pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a009-02",
+          "description": "Staff availability using availability_windows table",
+          "check": "Section 3 contains 'availability_windows' with day_of_week and start_time and end_time"
+        },
+        {
+          "id": "a009-03",
+          "description": "Booking conflict exclusion constraint scoped to staff and branch",
+          "check": "Section 3 contains 'EXCLUDE USING gist' with staff_id and branch_id"
+        },
+        {
+          "id": "a009-04",
+          "description": "Deposit policy as jsonb on businesses table",
+          "check": "Section 3 contains 'deposit_policy' in businesses or tenants table as jsonb"
+        },
+        {
+          "id": "a009-05",
+          "description": "Waitlist with cancellation trigger",
+          "check": "Section 3 or Section 7 contains 'waitlist' and a trigger or automation event for cancellation"
+        },
+        {
+          "id": "a009-06",
+          "description": "Loyalty accounts and transactions present",
+          "check": "Section 3 contains 'loyalty_accounts' or 'loyalty_transactions' or 'loyalty_points'"
+        },
+        {
+          "id": "a009-07",
+          "description": "M-Pesa STK Push used for deposit collection",
+          "check": "Section 3 or Section 4 contains 'STK Push' or 'Daraja' or 'M-Pesa' for deposit payment"
+        },
+        {
+          "id": "a009-08",
+          "description": "Branch KPI dashboard or materialised view present",
+          "check": "Section 3 or Section 7 contains 'branch_kpis' or 'kpi' or 'materialised view' or 'materialized view'"
+        },
+        {
+          "id": "a009-09",
+          "description": "No-show policy tracked and enforced",
+          "check": "Section 3 contains 'no_show' as a booking state and Section 7 or Section 3 references no-show policy or penalty"
+        },
+        {
+          "id": "a009-10",
+          "description": "Optimistic slot hold with expiry",
+          "check": "Section 3 contains 'held_until' or 'hold' and a pg_cron or automation job to release expired holds"
+        },
+        {
+          "id": "a009-11",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a009-12",
+          "description": "Assumptions block mentions Kenya and M-Pesa",
+          "check": "output contains '## Assumptions Made' and mentions Kenya or KES and M-Pesa or Daraja"
+        }
+      ]
+    },
+    {
+      "id": "eval-010",
+      "name": "Multi-branch health clinic with franchise management and SORF (Nigeria)",
+      "prompt": "Design a multi-branch health clinic appointment platform for Nigeria called MedBook. Patients book appointments at any HealthFirst clinic branch, pay a ₦5,000 deposit via Paystack to confirm, and receive SMS reminders. Doctors manage their own availability. The clinic group owner sees cross-branch analytics. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a010-01",
+          "description": "Branch hierarchy: businesses, branches, staff (doctors)",
+          "check": "Section 3 contains 'businesses' and 'branches' and 'staff' tables reflecting the multi-branch structure"
+        },
+        {
+          "id": "a010-02",
+          "description": "SORF booking states including checked_in and in_progress",
+          "check": "Section 3 contains booking_status with 'checked_in' and 'in_progress' as distinct states"
+        },
+        {
+          "id": "a010-03",
+          "description": "Doctor availability managed via availability_windows",
+          "check": "Section 3 contains 'availability_windows' for doctor/staff scheduling"
+        },
+        {
+          "id": "a010-04",
+          "description": "Paystack deposit with idempotency key",
+          "check": "Section 3 or Section 4 contains 'Paystack' and 'idempotency' or 'idempotency_key' for deposit flow"
+        },
+        {
+          "id": "a010-05",
+          "description": "Franchise owner cross-branch view or materialised view",
+          "check": "Section 3 or Section 5 contains 'franchise' or 'cross-branch' or 'branch_kpis' or 'aggregate' dashboard"
+        },
+        {
+          "id": "a010-06",
+          "description": "No-show policy enforced",
+          "check": "Section 3 or Section 7 contains 'no_show' handling with policy enforcement (deposit forfeiture or prepayment requirement)"
+        },
+        {
+          "id": "a010-07",
+          "description": "All API endpoints have auth requirements documented",
+          "check": "Section 4 documents auth requirement for every endpoint (Bearer JWT or none for public endpoints)"
+        },
+        {
+          "id": "a010-08",
+          "description": "SMS reminder automation in Section 7",
+          "check": "Section 7 contains a cron job or automation event for appointment reminders (24h or 2h before)"
+        },
+        {
+          "id": "a010-09",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a010-10",
+          "description": "Monetization includes actual Naira figures",
+          "check": "Section 9 contains at least one specific Naira amount (₦) for deposit, subscription, or commission"
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 8 cases pass."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 10 cases pass."
   }
 }
