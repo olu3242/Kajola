@@ -282,10 +282,136 @@
         }
       ]
     }
+    {
+      "id": "eval-007",
+      "name": "Ride-hailing dispatch with M-Pesa and USSD (Kenya)",
+      "prompt": "Design a boda-boda (motorcycle taxi) dispatch platform for Nairobi, Kenya. Riders join Saccos, passengers book and pay via M-Pesa STK Push, fares are settled via M-Pesa B2C payout. Feature-phone riders need a USSD fallback for earnings checks. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a007-01",
+          "description": "M-Pesa STK Push used for passenger payments",
+          "check": "output contains 'STK Push' or 'STK' or 'Daraja' in Sections 3, 4, or 8"
+        },
+        {
+          "id": "a007-02",
+          "description": "M-Pesa B2C used for rider payouts",
+          "check": "output contains 'B2C' or 'BusinessPayment' or 'payout' in Sections 3 or 4"
+        },
+        {
+          "id": "a007-03",
+          "description": "KES currency used throughout",
+          "check": "output contains 'KES' or 'Kenya shilling' in Sections 2, 3, or 9"
+        },
+        {
+          "id": "a007-04",
+          "description": "USSD fallback for feature-phone riders",
+          "check": "output contains 'USSD' in Sections 3, 4, or 5"
+        },
+        {
+          "id": "a007-05",
+          "description": "Rider and passenger as distinct personas",
+          "check": "Section 1 contains at least two distinct personas (rider and passenger)"
+        },
+        {
+          "id": "a007-06",
+          "description": "PostGIS nearest-rider query present",
+          "check": "Section 3 contains geography or PostGIS or ST_DWithin for rider location"
+        },
+        {
+          "id": "a007-07",
+          "description": "Africa's Talking or Termii for SMS fallback",
+          "check": "output contains 'Africa\\'s Talking' or 'Termii' in Sections 3 or 8"
+        },
+        {
+          "id": "a007-08",
+          "description": "Sacco/tenant multi-tenancy modelled",
+          "check": "Section 3 contains tenant_id and RLS policies"
+        },
+        {
+          "id": "a007-09",
+          "description": "Offline GPS queue addressed",
+          "check": "output contains 'offline' or 'queue' or 'cache' in Sections 5 or 6"
+        },
+        {
+          "id": "a007-10",
+          "description": "Daraja HMAC callback verification",
+          "check": "Section 4 or Section 8 contains HMAC or signature verification for M-Pesa callbacks"
+        },
+        {
+          "id": "a007-11",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a007-12",
+          "description": "Assumptions block present with Kenya-specific notes",
+          "check": "output contains '## Assumptions Made' and mentions Daraja or Safaricom or CBK"
+        }
+      ]
+    },
+    {
+      "id": "eval-008",
+      "name": "Bilingual and offline-first compliance (West Africa)",
+      "prompt": "Design a micro-logistics platform for Accra, Ghana and Abidjan, Côte d'Ivoire. Small parcels booked by phone, delivered by independent couriers. Bilingual UI (English + French). Orange Money payments for Côte d'Ivoire, MTN Mobile Money for Ghana. Couriers often lose connectivity during deliveries.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a008-01",
+          "description": "Orange Money or MTN Mobile Money referenced",
+          "check": "output contains 'Orange Money' or 'MTN Mobile Money' or 'MTN MoMo' in Sections 3 or 4"
+        },
+        {
+          "id": "a008-02",
+          "description": "Multi-currency: GHS and XOF both addressed",
+          "check": "output contains 'GHS' and ('XOF' or 'CFA' or 'franc')"
+        },
+        {
+          "id": "a008-03",
+          "description": "Bilingual (English + French) UX mentioned",
+          "check": "output contains 'French' or 'fr-' or 'bilingual' or 'i18n' in Sections 1, 5, or 8"
+        },
+        {
+          "id": "a008-04",
+          "description": "Offline-first pattern for couriers",
+          "check": "output contains 'offline' or 'SQLite' or 'queue' or 'sync' in Sections 5, 6, or 9"
+        },
+        {
+          "id": "a008-05",
+          "description": "Parcel tracking states in schema",
+          "check": "Section 3 contains parcel or shipment status states (e.g. picked_up, in_transit, delivered)"
+        },
+        {
+          "id": "a008-06",
+          "description": "Sender and courier as distinct personas",
+          "check": "Section 1 contains at least two personas: one who sends parcels and one who delivers"
+        },
+        {
+          "id": "a008-07",
+          "description": "RLS and tenant isolation present",
+          "check": "Section 3 contains 'ROW LEVEL SECURITY' and 'tenant_id'"
+        },
+        {
+          "id": "a008-08",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a008-09",
+          "description": "Phone OTP remains primary auth",
+          "check": "Section 5 specifies phone OTP as the authentication method"
+        },
+        {
+          "id": "a008-10",
+          "description": "Assumptions block notes multi-country scope",
+          "check": "output contains '## Assumptions Made' and mentions Ghana and Côte d'Ivoire or Abidjan"
+        }
+      ]
+    }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 6 cases pass."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 8 cases pass."
   }
 }

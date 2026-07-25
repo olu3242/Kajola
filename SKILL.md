@@ -30,8 +30,8 @@ If the user omits details, apply the Africa-first defaults below and proceed. Do
 | Styling | Tailwind CSS + shadcn/ui |
 | Monorepo | Turborepo |
 | Primary Payment | Paystack |
-| Secondary Payments | Flutterwave (Pan-Africa), M-Pesa (East Africa) |
-| SMS | Termii (primary), Twilio (fallback) |
+| Secondary Payments | Flutterwave (Pan-Africa), M-Pesa Daraja (East Africa), MTN Mobile Money (Ghana/Cameroon), Orange Money (Côte d'Ivoire/Senegal) |
+| SMS | Termii (primary, Nigeria + West Africa), Africa's Talking (East Africa: Kenya, Uganda, Tanzania, Rwanda), Twilio (fallback) |
 | Maps | Google Maps (web), react-native-maps (mobile) |
 | Search | Postgres full-text search (MVP), Typesense (scale) |
 | Queue | Supabase pg_cron + custom jobs table |
@@ -52,16 +52,22 @@ Apply these patterns automatically to every platform generated:
 ### Payments
 - Paystack for NGN transactions (Nigeria)
 - Flutterwave for multi-currency (Ghana, Kenya, Rwanda, etc.)
-- M-Pesa STK Push for KES (Kenya, Tanzania)
+- M-Pesa Daraja C2B STK Push for KES customer payments (Kenya, Tanzania)
+- M-Pesa Daraja B2C for provider/courier payouts (Kenya, Tanzania)
+- MTN Mobile Money for GHS (Ghana), XAF (Cameroon)
+- Orange Money for XOF (Côte d'Ivoire, Senegal, Burkina Faso)
 - Cash/offline payment tracking with `cash_payments` table
 - Webhook verification on all payment providers (HMAC signature check)
 - Split payments and escrow pattern for marketplace transactions
+- Idempotency key on every payment initiation to prevent double charges
 
 ### Notifications
 - SMS-first for transactional alerts (OTP, booking confirmed, payment received)
 - Push notifications via Expo for in-app events
 - WhatsApp for high-value notifications (booking reminders, payment receipts)
 - Email optional — only if user provides address
+- **USSD fallback** for feature-phone users on dispatch, delivery, and earnings platforms: implement a USSD menu via Africa's Talking USSD gateway for markets where smartphone penetration is < 60% (e.g. rural Kenya, Uganda, Tanzania, francophone West Africa)
+- **Bilingual SMS templates** for multi-country platforms: store templates as i18n JSON keyed by locale (e.g. `en-GH`, `fr-CI`, `sw-KE`, `ha-NG`); select locale from user profile at send time
 
 ### Mobile UX
 - Android-first (70%+ market share in most African markets)
@@ -563,6 +569,9 @@ Before finishing, verify every section against these rules. If any check fails, 
 - [ ] Payment webhook handlers verify HMAC signatures
 - [ ] Offline queue pattern included in mobile app structure
 - [ ] Phone OTP is the primary auth method (not email)
+- [ ] East Africa / feature-phone platforms include USSD fallback menu via Africa's Talking
+- [ ] Multi-country platforms include bilingual SMS templates in i18n JSON (locale-keyed)
+- [ ] M-Pesa platforms: STK Push used for C2B (customer pays), B2C used for payouts (platform pays rider/provider); never invert these
 - [ ] Physical asset platforms include deposit tracking (`deposit_status`, `deposit_deduction_kobo`) and condition photo flow
 - [ ] Section 9 contains no `X%`, `₦X,000`, or `TBD` — all rates are real numbers
 - [ ] Section 8.4 contains actual CI/CD job names and steps, not YAML comments
