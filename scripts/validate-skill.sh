@@ -137,6 +137,44 @@ for i in 1 2 3 4 5 6 7 8 9 10 11; do
 done
 assert_contains "references/output-template.md" "Assumptions Made"     "Assumptions block template present"
 
+# ── 8b. SORF-specific checks ─────────────────────────────────────────────────
+echo ""
+echo "[ SORF — Booking Engine checks ]"
+assert_contains "SKILL.md" "availability_windows"              "availability_windows referenced in SKILL.md"
+assert_contains "SKILL.md" "availability_overrides"            "availability_overrides referenced in SKILL.md"
+assert_contains "SKILL.md" "waitlist"                          "Waitlist pattern referenced in SKILL.md"
+assert_contains "SKILL.md" "no_show"                           "No-show tracking referenced in SKILL.md"
+assert_contains "SKILL.md" "held_until\|held.*slot\|slot.*hold\|optimistic" "Optimistic slot hold referenced in SKILL.md"
+assert_contains "SKILL.md" "deposit_policy"                    "Deposit policy jsonb referenced in SKILL.md"
+assert_contains "SKILL.md" "SORF\|Service Operations"         "SORF framework referenced in SKILL.md"
+
+echo ""
+echo "[ SORF — SQL patterns checks ]"
+assert_contains "references/sql-patterns.md" "availability_windows"   "availability_windows pattern in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "availability_overrides" "availability_overrides pattern in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "waitlist_entries"       "waitlist_entries pattern in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "notify_waitlist"        "Waitlist notification trigger in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "loyalty_accounts"       "Loyalty accounts pattern in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "branch_kpis"            "Branch KPIs materialised view in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "no_show_policy"         "No-show policy in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "deposit_policy"         "Deposit policy jsonb in sql-patterns.md"
+
+echo ""
+echo "[ SORF — API patterns checks ]"
+assert_contains "references/api-patterns.md" "Daraja\|M-Pesa\|mpesaStkPush" "M-Pesa Daraja pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "Africa.*Talking\|sendAtSms"   "Africa's Talking pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "USSD"                          "USSD handler pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "flushQueue\|offline.*queue\|expo-sqlite" "Offline queue pattern in api-patterns.md"
+
+echo ""
+echo "[ Examples — coverage ]"
+EXAMPLE_COUNT=$(ls examples/*.md 2>/dev/null | grep -v "^examples/README.md$" | wc -l)
+if [[ "$EXAMPLE_COUNT" -ge 4 ]]; then
+  check "At least 4 examples present (found $EXAMPLE_COUNT)" "pass"
+else
+  check "At least 4 examples present" "fail" "found $EXAMPLE_COUNT"
+fi
+
 # ── 9. evals/evals.json — structure validation ──────────────────────────────
 echo ""
 echo "[ evals/evals.json — structure ]"
@@ -148,12 +186,12 @@ else
   check "evals.json is valid JSON" "fail" "JSON parse error"
 fi
 
-# At least 6 cases
+# At least 8 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 6 ]]; then
-  check "evals.json has at least 6 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 8 ]]; then
+  check "evals.json has at least 8 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 6 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 8 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -169,16 +207,16 @@ else
   check "Every eval case has assertions" "fail" "$CASES_WITHOUT_ASSERTIONS case(s) have no assertions"
 fi
 
-# Total assertion count >= 30
+# Total assertion count >= 60
 ASSERTION_COUNT=$(python3 -c "
 import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 30 ]]; then
-  check "evals.json has at least 30 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 60 ]]; then
+  check "evals.json has at least 60 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 30 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 60 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present

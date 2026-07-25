@@ -302,6 +302,204 @@ async function getRecentBookings(phone: string) {
 }
 ```
 
+## SORF Booking State Machine (Edge Function)
+
+Validates and applies SORF lifecycle transitions. Import into any booking state-change endpoint.
+
+```typescript
+// SORF 9-state lifecycle — allowed transitions
+const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  pending:    ["confirmed", "held", "cancelled"],
+  held:       ["confirmed", "cancelled"],           // held → confirmed when deposit paid
+  confirmed:  ["checked_in", "cancelled", "no_show"],
+  checked_in: ["in_progress", "no_show"],
+  in_progress:["completed", "disputed"],
+  completed:  [],                                   // terminal state
+  cancelled:  [],                                   // terminal state
+  no_show:    [],                                   // terminal state
+  disputed:   ["completed", "cancelled"],           // manager resolves
+};
+
+type BookingStatus = keyof typeof ALLOWED_TRANSITIONS;
+
+async function transitionBookingState(
+  bookingId: string,
+  toStatus: BookingStatus,
+  meta: { userId: string; reason?: string }
+): Promise<{ ok: boolean; error?: string }> {
+  // 1. Fetch current status (RLS ensures caller can see this booking)
+  const { data: booking, error } = await supabase
+    .from("bookings")
+    .select("id, status, tenant_id, staff_id, customer_id, starts_at")
+    .eq("id", bookingId)
+    .single();
+
+  if (error || !booking) return { ok: false, error: "Booking not found" };
+
+  const from = booking.status as BookingStatus;
+  const allowed = ALLOWED_TRANSITIONS[from] ?? [];
+
+  if (!allowed.includes(toStatus)) {
+    return { ok: false, error: `Cannot transition '${from}' → '${toStatus}'` };
+  }
+
+  // 2. Build update patch — record timestamps for key transitions
+  const patch: Record<string, unknown> = { status: toStatus };
+  if (toStatus === "checked_in")  patch.checked_in_at = new Date().toISOString();
+  if (toStatus === "in_progress") patch.started_at    = new Date().toISOString();
+  if (toStatus === "completed")   patch.completed_at  = new Date().toISOString();
+  if (toStatus === "cancelled")   { patch.cancelled_at = new Date().toISOString(); patch.cancel_reason = meta.reason ?? ""; }
+  if (toStatus === "confirmed")   patch.held_until    = null;  // clear hold timer
+
+  // 3. Apply
+  const { error: updateErr } = await supabase
+    .from("bookings")
+    .update(patch)
+    .eq("id", bookingId);
+
+  if (updateErr) return { ok: false, error: updateErr.message };
+
+  // 4. Enqueue automation event (fire-and-forget via automation_jobs)
+  await supabase.from("automation_jobs").insert({
+    event_type:      `booking.${toStatus}`,
+    payload:         { booking_id: bookingId, from_status: from, actor_id: meta.userId },
+    idempotency_key: `booking-${bookingId}-${toStatus}-${Date.now()}`,
+  });
+
+  return { ok: true };
+}
+```
+
+## SORF Booking Hold + STK Push Orchestration
+
+Full flow for the Slot Hold → Deposit → Confirmed path. Use as the canonical template for any booking platform that uses M-Pesa deposits.
+
+```typescript
+// POST /bookings/hold
+async function holdBooking(req: Request): Promise<Response> {
+  const { branch_id, staff_id, service_id, starts_at } = await req.json();
+  const user = await getUser(req);
+  if (!user) return err(401, "Unauthorized");
+
+  // 1. Compute ends_at from service duration
+  const { data: service } = await supabase.from("services").select("duration_minutes, price_kes, deposit_override").eq("id", service_id).single();
+  const { data: business } = await supabase.from("businesses").select("deposit_policy").eq("id", /* branch.business_id */ "...").single();
+
+  const startsAt = new Date(starts_at);
+  const endsAt   = new Date(startsAt.getTime() + service.duration_minutes * 60_000);
+  const heldUntil = new Date(Date.now() + 15 * 60_000);  // 15-min hold
+
+  // 2. Compute deposit
+  const depositPolicy = service.deposit_override ?? business.deposit_policy;
+  const depositKes = depositPolicy.type === "percentage"
+    ? Math.round(service.price_kes * depositPolicy.value / 100)
+    : depositPolicy.value;
+
+  // 3. Insert booking (EXCLUDE USING gist will reject overlaps automatically)
+  const { data: booking, error } = await supabase.from("bookings").insert({
+    tenant_id: user.app_metadata.tenant_id,
+    branch_id, staff_id, service_id,
+    customer_id: user.id,
+    status:      "held",
+    starts_at:   startsAt.toISOString(),
+    ends_at:     endsAt.toISOString(),
+    held_until:  heldUntil.toISOString(),
+    price_kes:   service.price_kes,
+    deposit_kes: depositKes,
+  }).select().single();
+
+  if (error) {
+    // Postgres EXCLUDE constraint violation = slot conflict
+    if (error.code === "23P01") return err(409, "Slot no longer available", "CONFLICT");
+    return err(500, error.message);
+  }
+
+  return ok({ booking: { id: booking.id, status: "held", held_until: heldUntil, deposit_kes: depositKes } }, 201);
+}
+
+// POST /payments/initiate — triggers STK Push for the held booking's deposit
+async function initiateDeposit(req: Request): Promise<Response> {
+  const { booking_id, phone } = await req.json();
+  const user = await getUser(req);
+  if (!user) return err(401, "Unauthorized");
+
+  const { data: booking } = await supabase.from("bookings").select("*").eq("id", booking_id).eq("customer_id", user.id).single();
+  if (!booking || booking.status !== "held") return err(404, "Booking not found or not in held state");
+  if (new Date(booking.held_until) < new Date()) return err(409, "Hold expired — please rebook", "HOLD_EXPIRED");
+
+  const idempotencyKey = `booking-${booking_id}-deposit`;
+
+  // Upsert momo_transactions — idempotent: if already initiated, return existing reference
+  const { data: existing } = await supabase.from("momo_transactions").select("provider_reference").eq("idempotency_key", idempotencyKey).maybeSingle();
+  if (existing?.provider_reference) {
+    return ok({ checkout_request_id: existing.provider_reference, message: "STK Push already sent — check your phone" });
+  }
+
+  // Initiate STK Push
+  const { CheckoutRequestID } = await mpesaStkPush({
+    phone: phone.replace("+", ""),
+    amount: booking.deposit_kes,
+    reference: booking_id.slice(0, 12),
+    description: `Deposit`,
+  });
+
+  await supabase.from("momo_transactions").insert({
+    tenant_id:       booking.tenant_id,
+    booking_id:      booking_id,
+    customer_id:     user.id,
+    provider:        "mpesa_ke",
+    momo_direction:  "c2b",
+    amount_kes:      booking.deposit_kes,
+    phone,
+    provider_reference: CheckoutRequestID,
+    idempotency_key: idempotencyKey,
+  });
+
+  return ok({ checkout_request_id: CheckoutRequestID, message: "STK Push sent — check your phone" });
+}
+```
+
+## Loyalty Credit on Booking Completion
+
+Called after booking transitions to `completed`. Idempotent — safe to retry.
+
+```typescript
+async function creditLoyaltyPoints(bookingId: string): Promise<void> {
+  const { data: booking } = await supabase.from("bookings").select("tenant_id, customer_id, price_kes").eq("id", bookingId).single();
+  if (!booking) return;
+
+  const idempotencyKey = `loyalty-${bookingId}-earn`;
+  const { data: existing } = await supabase.from("loyalty_transactions").select("id").eq("booking_id", bookingId).eq("tx_type", "earn").maybeSingle();
+  if (existing) return;  // already credited — idempotent
+
+  // 1 point per KES spent (integer, no sub-point)
+  const points = booking.price_kes;
+
+  // Upsert loyalty account (create if first booking)
+  const { data: account } = await supabase.from("loyalty_accounts")
+    .upsert({ tenant_id: booking.tenant_id, customer_id: booking.customer_id }, { onConflict: "customer_id" })
+    .select("id, points_balance, lifetime_points").single();
+
+  const newBalance       = account.points_balance  + points;
+  const newLifetime      = account.lifetime_points + points;
+
+  // Determine tier upgrade
+  const newTier = newLifetime >= 50000 ? "platinum" : newLifetime >= 20000 ? "gold" : newLifetime >= 5000 ? "silver" : "bronze";
+
+  await Promise.all([
+    supabase.from("loyalty_accounts").update({ points_balance: newBalance, lifetime_points: newLifetime, tier: newTier }).eq("id", account.id),
+    supabase.from("loyalty_transactions").insert({
+      tenant_id:    booking.tenant_id,
+      account_id:   account.id,
+      booking_id:   bookingId,
+      tx_type:      "earn",
+      points:       points,
+      balance_after: newBalance,
+    }),
+  ]);
+}
+```
+
 ## Offline Queue Pattern (Mobile — React Native / Expo)
 
 Cache actions locally when offline; flush in FIFO order on reconnect. Works with any Supabase Edge Function endpoint.

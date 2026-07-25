@@ -448,9 +448,30 @@ List every Supabase Edge Function with its trigger and purpose.
 
 **7.1 Event Catalogue**
 
+Every booking platform must include at minimum these SORF-anchored events. Add domain-specific events alongside them.
+
+| Event Name | Trigger | Handler Action | Idempotency Key Pattern |
+|---|---|---|---|
+| `booking.held` | Booking created with `status = held` | Start 15-min hold timer; log audit entry | `booking-{id}-held` |
+| `booking.confirmed` | Deposit paid; status → `confirmed` | SMS to customer + staff; push notification; clear `held_until` | `booking-{id}-confirmed` |
+| `booking.checked_in` | Staff marks `checked_in` | Notify stylist; log check-in time; emit KPI event | `booking-{id}-checkin` |
+| `booking.completed` | Staff marks `completed` | Initiate balance STK Push / Paystack charge; credit loyalty points; enqueue rating SMS (30-min delay); release wallet hold | `booking-{id}-completed` |
+| `booking.cancelled` | Status → `cancelled` | Evaluate refund per policy; initiate refund if eligible; notify waitlist (via DB trigger) | `booking-{id}-cancelled` |
+| `booking.no_show` | pg_cron detects no check-in 30+ min post-start | Increment `no_show_count`; apply no-show policy; notify branch manager | `booking-{id}-no-show` |
+| `booking.disputed` | Dispute raised | Freeze payout; notify manager; create dispute record | `booking-{id}-disputed` |
+| `payment.confirmed` | Payment provider webhook success | Update booking status; update transaction row | `{provider}-{tx-id}` |
+| `payment.failed` | Payment provider webhook failure | Release hold; notify customer with retry link | `{provider}-{tx-id}-fail` |
+| `waitlist.notified` | DB trigger on cancellation / no-show | Send SMS to next waitlist customer; set 15-min acceptance window | `waitlist-{entry-id}-notify` |
+| `loyalty.credited` | `booking.completed` fires | Insert loyalty_transactions; check tier upgrade; send SMS if tier upgraded | `loyalty-{booking-id}-earn` |
+| `reminder.24h` | pg_cron 24h before `starts_at` | SMS + push: "Your appointment is tomorrow with [staff] at [branch]" | `reminder-{booking-id}-24h` |
+| `reminder.2h` | pg_cron 2h before `starts_at` | SMS: appointment in 2 hours; include branch address or directions link | `reminder-{booking-id}-2h` |
+| `ai.noshow_risk` | Daily cron at 22:00 local time | Score next-day bookings; flag risk > 60%; enqueue branch manager SMS alert | `ai-noshow-{date}-{booking-id}` |
+| `ai.rebook_nudge` | Median re-booking interval post-completion | Push + SMS nudge with last stylist name; respect opt-out flag | `rebook-{customer-id}-{service-id}` |
+
+Add domain-specific events (e.g. `equipment.returned`, `driver.dispatched`, `parcel.delivered`) to the bottom of the table.
+
 | Event Name | Trigger | Handler Function | Idempotency Key |
 |---|---|---|---|
-| ... | ... | ... | ... |
 
 **7.2 Jobs Table Schema**
 
@@ -595,7 +616,8 @@ For each threshold, specify concrete infrastructure actions — not generic advi
 |---|---|---|
 | Enable Supabase connection pooling (pgBouncer) | > 50 concurrent users | Supabase dashboard → Database → Connection Pooling |
 | Add Postgres indexes for search queries | p95 query > 100ms | Run `EXPLAIN ANALYZE`, add covering index |
-| Enable Cloudflare CDN for static assets | > 1k daily active users | ... |
+| Enable Cloudflare CDN for static assets | > 1k daily active users | Cloudflare zone + Workers for edge caching |
+| AI Operations v1 (rule-based) | At launch | No-show risk flag = 3+ historical no-shows OR <24h booking; re-booking nudge = fixed N-day interval per service category |
 | ... | ... | ... |
 
 **10.2 10,000 → 100,000 Users**
@@ -607,6 +629,7 @@ For each threshold, specify concrete infrastructure actions — not generic advi
 | Upgrade Supabase to Large compute | DB CPU sustained > 70% | Large plan: 8GB RAM, 8 CPU |
 | Add Postgres read replica | Read:write ratio > 4:1 | Route search and list queries to replica |
 | Enable Edge Function warm instances | Cold start p95 > 1s | Supabase dedicated (always-warm) instances |
+| AI Operations v2 (ML model) | No-show rule-based accuracy < 65% | Logistic regression on 6 features (history, time, lead-time, weather, day-of-week, service type); retrain weekly; host on Fly.io `fly.toml` with 256MB machine; latency < 50ms per prediction |
 
 **10.3 100,000 → 1,000,000 Users**
 
@@ -617,6 +640,7 @@ For each threshold, specify concrete infrastructure actions — not generic advi
 | Add second read replica | Primary replica lag > 100ms | Route by query type: analytics → replica 2, real-time → replica 1 |
 | Migrate to dedicated Postgres | Supabase plan limits reached | AWS RDS `db.r6g.xlarge` on af-south-1; retain Supabase Auth |
 | Multi-region Edge Functions | Latency > 400ms for users outside Lagos | Cloudflare Workers with regional routing; Supabase Auth retained centrally |
+| AI Operations v3 (real-time personalisation) | Re-booking nudge CTR < 15% | Real-time feature store (Redis) updated on each booking event; personalised nudge copy and timing per customer segment; A/B test cadence (Growthbook) |
 
 ---
 
@@ -666,7 +690,7 @@ Before finishing, verify every section against these rules. If any check fails, 
 - [ ] Multi-country platforms include bilingual SMS templates in i18n JSON (locale-keyed)
 - [ ] M-Pesa platforms: STK Push used for C2B (customer pays), B2C used for payouts (platform pays rider/provider); never invert these
 - [ ] Physical asset platforms include deposit tracking (`deposit_status`, `deposit_deduction_kobo`) and condition photo flow
-- [ ] Booking platforms follow SORF lifecycle — booking status enum includes all 8 states: `pending`, `confirmed`, `checked_in`, `in_progress`, `completed`, `cancelled`, `no_show`, `disputed`
+- [ ] Booking platforms follow SORF lifecycle — booking status enum includes all 9 states: `pending`, `confirmed`, `held`, `checked_in`, `in_progress`, `completed`, `cancelled`, `no_show`, `disputed`
 - [ ] Slot conflict prevention scoped to `(staff_id, branch_id)` — not just provider-level — for multi-staff businesses
 - [ ] Staff availability uses `availability_windows` (recurring) + `availability_overrides` (one-off) tables — never hardcoded hours
 - [ ] Deposit policy stored in `businesses.deposit_policy` jsonb and enforced server-side, not assumed in client
