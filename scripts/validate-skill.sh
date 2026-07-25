@@ -73,6 +73,8 @@ assert_file_exists "README.md"
 assert_file_exists "CONTRIBUTING.md"
 assert_file_exists ".github/PULL_REQUEST_TEMPLATE.md"
 assert_file_exists "scripts/check-example.sh"
+assert_file_exists "supabase/functions/book-slot/index.ts"
+assert_file_exists "supabase/functions/confirm-payment/index.ts"
 
 # ── 2. SKILL.md — all 11 section headers present ────────────────────────────
 echo ""
@@ -141,6 +143,15 @@ assert_contains "references/output-template.md" "Assumptions Made"     "Assumpti
 
 # ── 8b. SORF-specific checks ─────────────────────────────────────────────────
 echo ""
+echo "[ SKILL.md — vertical patterns ]"
+assert_contains "SKILL.md" "Vertical-Specific\|vertical.*schema\|Vertical Quick" "Vertical-Specific Schema Patterns section present"
+assert_contains "SKILL.md" "Healthcare\|Telemedicine"          "Healthcare vertical pattern present"
+assert_contains "SKILL.md" "Fitness.*Gym\|Gym.*Fitness\|Class-Based" "Fitness/Gym vertical pattern present"
+assert_contains "SKILL.md" "Home Services\|On-Demand Dispatch" "Home Services vertical pattern present"
+assert_contains "SKILL.md" "Equipment.*Rental\|Vehicle Rental"  "Equipment/Vehicle Rental vertical pattern present"
+assert_contains "SKILL.md" "Logistics.*Delivery\|Delivery Dispatch" "Logistics/Delivery vertical pattern present"
+
+echo ""
 echo "[ SORF — Booking Engine checks ]"
 assert_contains "SKILL.md" "availability_windows"              "availability_windows referenced in SKILL.md"
 assert_contains "SKILL.md" "availability_overrides"            "availability_overrides referenced in SKILL.md"
@@ -190,10 +201,10 @@ fi
 
 # At least 14 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 14 ]]; then
-  check "evals.json has at least 14 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 16 ]]; then
+  check "evals.json has at least 16 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 14 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 16 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -209,16 +220,16 @@ else
   check "Every eval case has assertions" "fail" "$CASES_WITHOUT_ASSERTIONS case(s) have no assertions"
 fi
 
-# Total assertion count >= 150
+# Total assertion count >= 170
 ASSERTION_COUNT=$(python3 -c "
 import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 150 ]]; then
-  check "evals.json has at least 150 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 170 ]]; then
+  check "evals.json has at least 170 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 150 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 170 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present

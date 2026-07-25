@@ -936,11 +936,142 @@
           "check": "output contains '## Assumptions Made' and mentions Ghana and Kenya"
         }
       ]
+    },
+    {
+      "id": "eval-017",
+      "name": "On-demand home services platform (Nigeria)",
+      "prompt": "Design a multi-tenant on-demand home services platform for Nigeria called HomePro. Customers book verified providers for home cleaning, plumbing, electrical repairs, AC servicing, and painting. Providers complete a background check before listing. Customers pay a 30% deposit via Paystack to hold the slot; remaining balance is charged on job completion. Provider GPS location is shared with the customer in real-time from dispatch to arrival. Before and after photo evidence uploaded to Supabase Storage. Loyalty points earned per completed job. Multi-city: Lagos, Abuja, Port Harcourt. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a017-01",
+          "description": "Provider profile includes background check status column",
+          "check": "Section 3 contains 'background_check_status' or 'background_check' on provider profile table"
+        },
+        {
+          "id": "a017-02",
+          "description": "GPS tracking table present (gps_pings or equivalent)",
+          "check": "Section 3 contains 'gps_pings' or 'location_pings' or 'gps_track' for provider tracking"
+        },
+        {
+          "id": "a017-03",
+          "description": "Job photo evidence table with before/after photo types",
+          "check": "Section 3 contains 'job_photos' or 'photo_type' or 'before' and 'after' evidence"
+        },
+        {
+          "id": "a017-04",
+          "description": "EXCLUDE USING gist prevents provider double-booking",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for provider schedule conflict prevention"
+        },
+        {
+          "id": "a017-05",
+          "description": "availability_windows for provider weekly scheduling",
+          "check": "Section 3 contains 'availability_windows' with day_of_week"
+        },
+        {
+          "id": "a017-06",
+          "description": "waitlist_entries for constrained provider availability",
+          "check": "Section 3 contains 'waitlist_entries'"
+        },
+        {
+          "id": "a017-07",
+          "description": "loyalty_accounts for customer points programme",
+          "check": "Section 3 contains 'loyalty_accounts'"
+        },
+        {
+          "id": "a017-08",
+          "description": "30% deposit handled via deposit_policy or explicit deposit amount",
+          "check": "Section 3 or Section 4 contains '30%' or '30 percent' or 'deposit_policy'"
+        },
+        {
+          "id": "a017-09",
+          "description": "Paystack HMAC webhook verification present",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a017-10",
+          "description": "held_until for 15-minute optimistic slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a017-11",
+          "description": "Real NGN service pricing in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) for service fees or platform commission"
+        },
+        {
+          "id": "a017-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-018",
+      "name": "Car wash and auto-detailing chain (Nigeria and Ghana)",
+      "prompt": "Design a multi-tenant car wash and auto-detailing booking platform for Nigeria and Ghana called SparkWash. Customers book express (30-minute) or premium full-detail (3-hour) slots at specific branch locations. Monthly membership passes sold via Paystack Recurring for Nigeria; MTN Mobile Money subscriptions for Ghana. Walk-in queue management runs alongside pre-booked appointments. Loyalty stamp card: 10 washes earn 1 free wash. Branch managers see a live queue dashboard. Multi-currency: NGN (Paystack) for Nigeria, GHS (MTN Mobile Money) for Ghana. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a018-01",
+          "description": "Express and premium service types modelled in schema",
+          "check": "Section 3 contains 'express' or 'premium' or 'service_type' or 'wash_type' distinct service categories"
+        },
+        {
+          "id": "a018-02",
+          "description": "Monthly membership / subscription with recurring billing",
+          "check": "Section 3 or Section 4 contains 'membership' or 'subscription' with 'recurring' or 'paystack_sub_code'"
+        },
+        {
+          "id": "a018-03",
+          "description": "EXCLUDE USING gist for bay or slot conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for booking slot conflict"
+        },
+        {
+          "id": "a018-04",
+          "description": "availability_windows for branch operating hours",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a018-05",
+          "description": "branch_kpis materialised view for live queue dashboard",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a018-06",
+          "description": "loyalty_accounts for stamp card programme",
+          "check": "Section 3 contains 'loyalty_accounts' and 'loyalty_transactions'"
+        },
+        {
+          "id": "a018-07",
+          "description": "MTN Mobile Money present for Ghana",
+          "check": "output contains 'MTN' or 'MoMo' or 'MTN_MNO_API_KEY' for Ghana payments"
+        },
+        {
+          "id": "a018-08",
+          "description": "HMAC webhook verification for payment providers",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature' or 'x-mtn-signature'"
+        },
+        {
+          "id": "a018-09",
+          "description": "held_until for 15-minute optimistic slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a018-10",
+          "description": "Real NGN pricing in Section 9 monetization",
+          "check": "Section 9 contains specific NGN amounts (₦) for service pricing or platform fees"
+        },
+        {
+          "id": "a018-11",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 16 cases pass. Target: 16 cases, 160 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 18 cases pass. Target: 18 cases, 182 assertions."
   }
 }

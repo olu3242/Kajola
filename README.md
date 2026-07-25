@@ -128,14 +128,16 @@ kajola/
 │   ├── output-template.md          # Structured output template for all 11 sections
 │   └── api-patterns.md             # Edge Function patterns: HMAC, M-Pesa, AT SMS, offline queue
 ├── evals/
-│   └── evals.json                  # 16 test cases, 160 assertions
+│   └── evals.json                  # 18 test cases, 183 assertions
 ├── supabase/
 │   ├── migrations/                 # Reference migrations (SORF baseline schema)
 │   └── functions/
-│       └── book-slot/index.ts      # SORF hold-state Edge Function reference implementation
+│       ├── book-slot/index.ts      # SORF hold-state Edge Function reference implementation
+│       └── confirm-payment/index.ts  # SORF Paystack webhook (HMAC → held→confirmed + loyalty)
 ├── scripts/
 │   ├── check-example.sh            # SORF compliance validator for individual example files (50 checks)
-│   └── validate-skill.sh           # Full skill structure validator
+│   ├── run-evals.sh                # Eval runner: print prompts + assertions for manual testing
+│   └── validate-skill.sh           # Full skill structure validator (97 checks)
 └── examples/
     ├── README.md                   # Examples index
     ├── kajola-artisan-platform.md  # Artisan booking marketplace — Nigeria (Paystack + Termii)
@@ -144,7 +146,8 @@ kajola/
     ├── parcelrun-ghana-ci.md       # Micro-logistics — Ghana + Côte d'Ivoire (MTN + Orange Money, bilingual)
     ├── glamplus-beauty-kenya.md    # Beauty salon chain — Kenya (M-Pesa deposit + SORF + loyalty + waitlist)
     ├── medconnect-telemedicine-nigeria.md  # Telemedicine platform — Nigeria (Paystack + Termii + Whereby)
-    └── fitbook-gym-nigeria.md      # Gym + fitness class booking — Nigeria (Paystack Recurring + QR check-in)
+    ├── fitbook-gym-nigeria.md      # Gym + fitness class booking — Nigeria (Paystack Recurring + QR check-in)
+    └── homepro-nigeria.md          # Home services — Nigeria (GPS dispatch + photo evidence + background checks)
 ```
 
 ---

@@ -178,6 +178,95 @@ Apply these patterns automatically to every platform generated:
 
 ---
 
+## Vertical-Specific Schema Patterns
+
+When the platform's domain matches one of these verticals, apply the additional patterns below on top of the Africa-first defaults. The base SORF invariants (`availability_windows`, `EXCLUDE USING gist`, `waitlist_entries`, `loyalty_accounts`, `branch_kpis`) are always required — these patterns extend them, they do not replace them.
+
+### Healthcare & Telemedicine
+**When to apply**: clinics, hospitals, telemedicine platforms, diagnostic labs, pharmacies.
+
+Additional tables and columns:
+- `doctor_profiles`: `mdcn_number text UNIQUE` (or country-equivalent licence number), `specialty` enum, `consultation_fee_kobo bigint`, `accepts_video bool`
+- `appointment_type` enum: `'video' | 'in_person' | 'home_visit'`
+- `prescription_records`: `booking_id uuid FK`, `prescribed_by uuid FK`, `storage_path text` (encrypted PDF in Supabase Storage private bucket)
+- `lab_orders`: `booking_id uuid FK`, `test_codes text[]`, `status` enum, `result_path text`
+
+Special rules:
+- Medical records bucket: `PRIVATE` — always return short-lived signed URLs (never public URLs)
+- Video rooms: use **Whereby Embedded** (`WHEREBY_API_KEY`); create room on `booking.confirmed` event; embed in Expo WebView + Next.js iframe
+- Patient data residency: Supabase region must match clinic's country where legally required (e.g. `ap-southeast-1` is NOT compliant for Nigerian patient data — use the nearest compliant region)
+- Never expose `mdcn_number`, prescriptions, or lab results in search or listing APIs
+
+### Fitness & Gym (Class-Based)
+**When to apply**: gyms, yoga studios, pilates, spin, boxing clubs, group fitness centres.
+
+Apply this dual booking model alongside the standard SORF tables:
+
+1. **Group classes**: `class_sessions` table with `enrolled_count int` + `max_capacity int`; enrollment uses an atomic `SELECT FOR UPDATE` lock + count check in a DB transaction (not `EXCLUDE USING gist` — multiple customers share the slot)
+2. **1:1 sessions** (personal training): standard `bookings` table with `EXCLUDE USING gist` on `(staff_id, branch_id, tstzrange(starts_at, ends_at, '[)'))` — also prevents trainer from teaching two classes at the same time
+
+Additional tables:
+- `class_types`: `name text`, `duration_minutes int`, `max_capacity int`, `equipment_needed text[]`
+- `class_sessions`: FK to `class_types` + trainer, `enrolled_count int DEFAULT 0`, `max_capacity int`, `EXCLUDE USING gist` on trainer's own time to prevent double-scheduling
+- `class_enrollments`: `session_id uuid FK`, `customer_id uuid FK`, `status` enum (`'enrolled'|'attended'|'cancelled'|'no_show'`), `check_in_at timestamptz`
+- `memberships`: `customer_id uuid FK`, `plan_id uuid FK`, `paystack_sub_code text` (Paystack Recurring), `credits_remaining int`
+- `member_profiles`: `check_in_code uuid UNIQUE DEFAULT gen_random_uuid()` — displayed as QR code on member's phone; validated by reception scan
+
+Use **Paystack Subscriptions API** for recurring membership billing: create a Plan, subscribe customer, store `paystack_sub_code` on `memberships`. Do not use one-time charges for recurring memberships.
+
+### Home Services & On-Demand Dispatch
+**When to apply**: cleaning, plumbing, electrical, AC repair, painting, pest control, appliance repair, moving.
+
+Additional tables:
+- `provider_profiles`: `background_check_status` enum (`'pending'|'passed'|'failed'`), `service_categories text[]`, `service_radius_km int`, `years_experience int`
+- `job_photos`: `booking_id uuid FK`, `photo_type` enum (`'before'|'after'|'damage'`), `storage_path text`, `uploaded_by uuid FK`, `synced_at timestamptz`
+- `gps_pings`: `booking_id uuid FK`, `provider_id uuid FK`, `location geography(POINT,4326)`, `accuracy_m numeric(6,1)`, `recorded_at timestamptz` — **append-only, no UPDATE or DELETE**
+- `service_quotes`: `booking_id uuid FK`, `amount_kobo bigint`, `valid_until timestamptz`, `status` enum (`'pending'|'accepted'|'rejected'|'expired'`)
+
+Special rules:
+- Never allow a booking to reach `confirmed` if `provider_profiles.background_check_status != 'passed'`
+- GPS pings are append-only — add `CHECK (recorded_at <= now() + interval '5 seconds')` to prevent future timestamps
+- Quote flow: for jobs above a configurable threshold (e.g. ₦50,000), insert a `service_quotes` row before allowing slot hold; the slot is only held on quote acceptance
+- Storage bucket `job-evidence`: PRIVATE; return signed URLs valid 24h when sharing before/after photos with customer
+
+### Equipment & Vehicle Rental
+**When to apply**: vehicle hire, equipment rental, heavy machinery leasing, self-catering accommodation (day/week-based availability).
+
+Key difference from appointment booking — use **date-range conflict prevention**:
+- `EXCLUDE USING gist` on `daterange(starts_on, ends_on, '[]')` scoped to `asset_id` (not `tstzrange`)
+- Two-part payment: `rental_fee_kobo` + `security_deposit_kobo` tracked separately; deposit held until return
+- `deposit_status` enum: `'held' | 'returned' | 'partial_deduction' | 'forfeited'`
+- `deposit_deduction_kobo bigint DEFAULT 0` — amount withheld on damage
+
+Additional tables:
+- `asset_profiles`: `asset_type text`, `condition_status` enum, `make text`, `model text`, `year int`, `daily_rate_kobo bigint`
+- `condition_records`: `asset_id uuid FK`, `booking_id uuid FK`, `recorded_at timestamptz`, `photos text[]`, `notes text`, `damage_cost_kobo bigint DEFAULT 0`
+- `availability_blocks`: `asset_id uuid FK`, `starts_on date`, `ends_on date`, `reason text` (maintenance / off-fleet / pending inspection)
+
+Note: for pure asset-rental platforms without human operators, `availability_windows` is not applicable — omit it and use `availability_blocks` instead. Keep `availability_windows` for hybrid platforms where a human operator is also assigned.
+
+### Logistics & Delivery Dispatch
+**When to apply**: courier, boda-boda dispatch, last-mile delivery, parcel forwarding, grocery/pharmacy delivery, ride-hailing.
+
+Key differences:
+- Bookings are **trips** or **orders** — typically immediate dispatch, not advance appointments
+- `EXCLUDE USING gist` still applies to courier schedule if same courier takes pre-scheduled routes
+- USSD fallback is **mandatory** for any logistics platform in markets where couriers use feature phones (rural Kenya, Uganda, francophone West Africa)
+
+Additional tables:
+- `trips`: `pickup_location geography(POINT,4326)`, `dropoff_location geography(POINT,4326)`, `fare_kobo bigint`, `distance_km numeric(8,2)`, `trip_status` enum
+- `gps_pings`: append-only courier location log (same schema as Home Services above)
+- `parcel_scans`: append-only scan log — `booking_id`, `scanned_by uuid`, `scan_type` enum (`'pickup'|'handoff'|'delivered'`), `location geography(POINT,4326)`, `synced_at timestamptz`
+- `ussd_sessions`: Africa's Talking session state — `session_id text`, `phone text`, `menu_state text`, `last_input text`, `expires_at timestamptz`
+
+Special rules:
+- Offline QR scan queue: `expo-sqlite` local store; `POST /offline-flush` processes the batch idempotently via `idempotency_key` on reconnect
+- Fare must be computed server-side (deterministic Edge Function), never client-side — client sends pickup/dropoff; server returns fare
+- M-Pesa B2C for rider/courier payouts; **never** use C2B for outbound disbursements
+- Bilingual SMS templates are required for multi-country logistics platforms
+
+---
+
 ## Output Format
 
 Generate all 11 sections in order. Use the exact headers below. Do not skip or summarize any section.
