@@ -210,6 +210,25 @@ What's inside:
 
 ---
 
+### [`pawperfect-pet-nigeria.md`](./pawperfect-pet-nigeria.md)
+
+**Markets**: Nigeria (NGN) · **Payments**: Paystack (card + bank transfer + USSD) · **Auth**: Phone OTP (Termii) · **Vertical**: Pet grooming & veterinary clinic
+
+What's inside:
+- `pet_profiles` table: `owner_id`, `species` enum (dog/cat/bird/rabbit/other), `breed`, `date_of_birth`, `weight_kg`, `microchip_id`, `photo_path` (private bucket)
+- `vaccine_records`: issued by vets per consultation; `vaccine_name`, `batch_number`, `next_due_at`, `certificate_path` (private Storage PDF); `status` enum (issued/due/overdue/revoked)
+- `health_notes`: per-visit clinical notes written by vets; **intentionally immutable** (no `updated_at`, no UPDATE/DELETE endpoints)
+- VCNV constraint: `staff.vcnv_number IS NOT NULL` enforced by CHECK constraint for `role = 'vet'`
+- `grooming_photos` table: before/after photos per session; private bucket + signed URLs
+- `pg_cron` daily job: marks `vaccine_records.status = 'overdue'` where `next_due_at < now()`
+- `automation_jobs` suite: appointment reminders (24h + 2h), vaccine due alert (7 days before), certificate ready SMS
+- `notify_waitlist` + `track_customer_no_show` triggers; 3-strike no-show policy
+- `branch_kpis` matview with grooming vs vet booking split by day
+- Multi-branch (Lagos + Abuja): separate `deposit_policy` jsonb per branch
+- Monetization: ₦5,000 basic grooming · ₦8,500 full grooming · ₦7,500 vet consult · 12% commission · ₦30,000/month/branch SaaS; ₦2,742,000/month MRR at 6 branches
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:

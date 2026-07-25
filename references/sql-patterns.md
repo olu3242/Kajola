@@ -1185,3 +1185,192 @@ CREATE INDEX idx_class_sessions_starts_at ON class_sessions (branch_id, starts_a
 CREATE INDEX idx_class_enrollments_session ON class_enrollments (session_id, status);
 CREATE INDEX idx_class_enrollments_customer ON class_enrollments (customer_id, status);
 ```
+
+---
+
+## Multi-Currency Booking Support
+
+Use when a single `tenant` operates across multiple countries with different currencies (e.g. Nigeria NGN + Ghana GHS) and needs to route payments to the correct provider per booking.
+
+```sql
+-- Currency enum (extend as needed)
+CREATE TYPE supported_currency AS ENUM ('NGN', 'GHS', 'KES', 'UGX', 'XOF', 'ZAR');
+
+-- Payment provider enum
+CREATE TYPE payment_provider AS ENUM (
+  'paystack', 'flutterwave', 'mpesa_daraja', 'mtn_momo', 'orange_money'
+);
+
+-- Branch-level currency and provider configuration
+ALTER TABLE branches
+  ADD COLUMN IF NOT EXISTS currency          supported_currency NOT NULL DEFAULT 'NGN',
+  ADD COLUMN IF NOT EXISTS payment_provider  payment_provider   NOT NULL DEFAULT 'paystack';
+
+-- Multi-currency payment transactions
+CREATE TABLE payment_transactions (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         uuid NOT NULL REFERENCES tenants(id),
+  booking_id        uuid NOT NULL REFERENCES bookings(id),
+  provider          payment_provider NOT NULL,
+  provider_ref      text UNIQUE,          -- Paystack ref / Flutterwave tx_ref / MoMo externalId
+  amount            numeric(16,2) NOT NULL,
+  currency          supported_currency NOT NULL,
+  amount_ngn_equiv  numeric(16,2),        -- FX snapshot at time of payment (for reporting)
+  fx_rate           numeric(12,6),        -- e.g. 1 GHS = 85.5 NGN at time of payment
+  status            payment_status NOT NULL DEFAULT 'pending',
+  idempotency_key   text UNIQUE NOT NULL,
+  is_deposit        boolean NOT NULL DEFAULT false,
+  metadata          jsonb NOT NULL DEFAULT '{}',
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_payment_transactions_booking   ON payment_transactions(booking_id);
+CREATE INDEX idx_payment_transactions_provider  ON payment_transactions(provider, provider_ref);
+
+-- FX rate log — snapshot of exchange rates used (for audit)
+CREATE TABLE fx_rate_snapshots (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  from_currency  supported_currency NOT NULL,
+  to_currency    supported_currency NOT NULL DEFAULT 'NGN',
+  rate           numeric(12,6) NOT NULL,
+  source         text NOT NULL DEFAULT 'manual',  -- 'manual' | 'openexchangerates' | 'fixer'
+  recorded_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (from_currency, to_currency, date_trunc('hour', recorded_at))
+);
+
+-- Helper function: resolve which payment provider to use for a booking
+CREATE OR REPLACE FUNCTION get_payment_provider_for_booking(p_booking_id uuid)
+RETURNS payment_provider LANGUAGE sql STABLE AS $$
+  SELECT br.payment_provider
+  FROM bookings bk
+  JOIN branches br ON br.id = bk.branch_id
+  WHERE bk.id = p_booking_id;
+$$;
+
+-- RLS: tenant isolation
+ALTER TABLE payment_transactions  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE fx_rate_snapshots     ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON payment_transactions
+  USING (tenant_id = current_user_tenant_id());
+```
+
+**Edge Function routing pattern**:
+```typescript
+const provider = await getPaymentProviderForBooking(bookingId)
+switch (provider) {
+  case 'paystack':    return await initiatePaystackPayment(params)
+  case 'flutterwave': return await initiateFlutterwavePayment(params)
+  case 'mtn_momo':    return await initiateMomoPayment(params)
+  case 'mpesa_daraja': return await initiateMpesaStkPush(params)
+  default: throw new Error(`Unsupported payment provider: ${provider}`)
+}
+```
+
+---
+
+## Event Deliverables Tracking
+
+Use for platforms where a booking has a set of promised outputs (photos, video files, reports) that must be fulfilled before the booking is marked `completed`. Most applicable to event photography, videography, legal, and professional services.
+
+```sql
+CREATE TYPE deliverable_type AS ENUM (
+  'photos', 'video_highlight', 'video_full', 'album', 'report', 'design_file', 'audio_recording'
+);
+
+CREATE TYPE deliverable_status AS ENUM (
+  'pending', 'in_progress', 'delivered', 'disputed', 'waived'
+);
+
+-- Event packages with deliverables summary
+CREATE TABLE event_packages (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id            uuid NOT NULL REFERENCES tenants(id),
+  name                 text NOT NULL,
+  description          text,
+  duration_hours       int NOT NULL DEFAULT 8,
+  price_kobo           bigint NOT NULL,
+  deliverables_summary jsonb NOT NULL DEFAULT '[]',
+  -- e.g. [{"type":"photos","count":500},{"type":"video_highlight","duration_min":3}]
+  is_active            boolean NOT NULL DEFAULT true,
+  created_at           timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_event_packages_tenant ON event_packages(tenant_id) WHERE is_active;
+
+-- Deliverables per booking
+CREATE TABLE deliverables (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id          uuid NOT NULL REFERENCES tenants(id),
+  booking_id         uuid NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  deliverable_type   deliverable_type NOT NULL,
+  promised_count     int,              -- NULL for types without count (full video)
+  promised_duration  interval,         -- NULL for photo-only deliverables
+  delivered_count    int DEFAULT 0,
+  status             deliverable_status NOT NULL DEFAULT 'pending',
+  delivery_deadline  timestamptz NOT NULL,
+  storage_paths      text[] DEFAULT '{}',
+  notes              text,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_deliverables_booking ON deliverables(booking_id, status);
+CREATE INDEX idx_deliverables_deadline ON deliverables(delivery_deadline) WHERE status = 'pending';
+
+-- Guard: prevent booking completion until all deliverables are delivered or waived
+CREATE OR REPLACE FUNCTION check_deliverables_before_complete()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  v_pending_count int;
+BEGIN
+  IF NEW.status = 'completed' AND OLD.status != 'completed' THEN
+    SELECT COUNT(*) INTO v_pending_count
+    FROM deliverables
+    WHERE booking_id = NEW.id
+      AND status NOT IN ('delivered', 'waived');
+
+    IF v_pending_count > 0 THEN
+      RAISE EXCEPTION
+        'Cannot complete booking: % deliverable(s) are not yet delivered or waived',
+        v_pending_count;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_check_deliverables_before_complete
+  BEFORE UPDATE ON bookings
+  FOR EACH ROW EXECUTE FUNCTION check_deliverables_before_complete();
+
+-- Portfolio items for creative staff profiles
+CREATE TYPE portfolio_media_type AS ENUM ('photo', 'video', 'reel', 'audio');
+
+CREATE TABLE portfolio_items (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  staff_id        uuid NOT NULL REFERENCES staff(id),
+  media_type      portfolio_media_type NOT NULL,
+  storage_path    text NOT NULL,      -- full-resolution (private bucket, signed URLs)
+  thumbnail_path  text,               -- compressed thumbnail (public bucket, CDN)
+  event_type      text,               -- 'wedding' | 'corporate' | 'birthday' | 'concert'
+  taken_at        date,
+  is_featured     boolean NOT NULL DEFAULT false,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_portfolio_staff ON portfolio_items(staff_id, is_featured);
+
+ALTER TABLE event_packages  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE deliverables    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE portfolio_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON event_packages
+  USING (tenant_id = current_user_tenant_id());
+CREATE POLICY "tenant_isolation" ON deliverables
+  USING (tenant_id = current_user_tenant_id());
+CREATE POLICY "tenant_isolation" ON portfolio_items
+  USING (tenant_id = current_user_tenant_id());
+```

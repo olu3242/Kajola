@@ -1064,3 +1064,139 @@ export function VideoConsultation({ roomUrl }: { roomUrl: string }) {
 ```
 
 Required env vars: `WHEREBY_API_KEY`
+
+---
+
+## Orange Money (Côte d'Ivoire / Senegal / Francophone West Africa)
+
+Use Orange Money for XOF (FCFA) collections in Côte d'Ivoire, Senegal, Mali, Burkina Faso, and Guinea. Orange Money is the dominant mobile money provider for francophone West Africa — use it alongside MTN MoMo for full coverage in mixed-operator markets.
+
+### Initiate Orange Money Payment (Web Payment Gateway)
+
+```typescript
+interface OrangeMoneyPaymentParams {
+  merchantKey: string;     // from ORANGE_MERCHANT_KEY env var
+  currency: 'XOF' | 'XAF' | 'GNF' | 'SLL';
+  orderId: string;         // unique idempotency key
+  amount: number;          // integer, e.g. 5000 for 5000 XOF
+  returnUrl: string;       // redirect after payment
+  cancelUrl: string;
+  notifUrl: string;        // webhook for payment notification
+  reference: string;       // optional merchant reference (booking_id)
+}
+
+interface OrangeMoneyPaymentResponse {
+  status: number;
+  message: string;
+  data: {
+    id: string;
+    created_at: string;
+    merchant_key: string;
+    currency: string;
+    order_id: string;
+    amount: number;
+    return_url: string;
+    cancel_url: string;
+    notif_url: string;
+    lang: string;
+    reference: string;
+    token: string;         // use to build payment URL
+    payment_url: string;   // redirect customer here
+  };
+}
+
+async function initiateOrangeMoneyPayment(
+  params: OrangeMoneyPaymentParams
+): Promise<OrangeMoneyPaymentResponse> {
+  // Step 1: get access token
+  const tokenRes = await fetch(
+    `${Deno.env.get('ORANGE_API_BASE_URL')}/oauth/v3/token`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${btoa(`${Deno.env.get('ORANGE_CLIENT_ID')}:${Deno.env.get('ORANGE_CLIENT_SECRET')}`)}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    }
+  );
+  const { access_token } = await tokenRes.json();
+
+  // Step 2: initiate payment session
+  const res = await fetch(
+    `${Deno.env.get('ORANGE_API_BASE_URL')}/webpayment/v1/cashIn`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        merchant_key: params.merchantKey,
+        currency: params.currency,
+        order_id: params.orderId,
+        amount: params.amount,
+        return_url: params.returnUrl,
+        cancel_url: params.cancelUrl,
+        notif_url: params.notifUrl,
+        lang: 'fr',    // default to French for francophone markets
+        reference: params.reference,
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Orange Money init failed: ${err}`);
+  }
+  return res.json();
+}
+```
+
+### Verify Orange Money Callback (webhook notification)
+
+```typescript
+interface OrangeMoneyCallbackPayload {
+  status: string;           // 'SUCCESS' | 'FAILED' | 'PENDING'
+  txnid: string;            // Orange transaction ID
+  txnmode: string;
+  inittxnmessage: string;
+  inittxnstatus: string;
+  confirmedamount: number;
+  message: string;
+  partner_transaction_id: string;  // merchant's order_id
+  reference: string;               // merchant's reference
+  notif_token: string;             // verify against ORANGE_NOTIF_TOKEN
+}
+
+function verifyOrangeMoneyCallback(
+  payload: OrangeMoneyCallbackPayload
+): boolean {
+  // Orange Money uses a static notif_token per merchant — compare directly
+  return payload.notif_token === Deno.env.get('ORANGE_NOTIF_TOKEN');
+}
+```
+
+### Check Orange Money Transaction Status
+
+```typescript
+async function getOrangeMoneyTransactionStatus(
+  orderId: string,
+  accessToken: string
+): Promise<{ status: string; amount: number; txnid: string }> {
+  const res = await fetch(
+    `${Deno.env.get('ORANGE_API_BASE_URL')}/webpayment/v1/transactionStatus/${orderId}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+  const data = await res.json();
+  return {
+    status: data.status,
+    amount: data.amount,
+    txnid: data.txnid,
+  };
+}
+```
+
+Required env vars: `ORANGE_CLIENT_ID`, `ORANGE_CLIENT_SECRET`, `ORANGE_MERCHANT_KEY`, `ORANGE_NOTIF_TOKEN`, `ORANGE_API_BASE_URL`

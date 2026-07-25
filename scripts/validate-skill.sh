@@ -151,6 +151,8 @@ assert_contains "SKILL.md" "Home Services\|On-Demand Dispatch" "Home Services ve
 assert_contains "SKILL.md" "Equipment.*Rental\|Vehicle Rental"  "Equipment/Vehicle Rental vertical pattern present"
 assert_contains "SKILL.md" "Logistics.*Delivery\|Delivery Dispatch" "Logistics/Delivery vertical pattern present"
 assert_contains "SKILL.md" "Laundry.*Pickup\|Pickup-Delivery\|laundry-as-a-service" "Laundry/Pickup-Delivery vertical pattern present"
+assert_contains "SKILL.md" "Event Photography\|Creative Services\|event_packages\|portfolio_items" "Event Photography vertical pattern present"
+assert_contains "SKILL.md" "Pet Services\|Veterinary\|pet_profiles\|vaccine_records" "Pet Services vertical pattern present"
 
 echo ""
 echo "[ SORF — Booking Engine checks ]"
@@ -184,6 +186,7 @@ assert_contains "references/api-patterns.md" "Termii\|sendTermiiOtp\|verifyTermi
 assert_contains "references/api-patterns.md" "Paystack.*Recurring\|createPaystackPlan\|subscribeCustomer\|paystack_sub_code" "Paystack Recurring pattern in api-patterns.md"
 assert_contains "references/api-patterns.md" "Flutterwave\|FLW_SECRET_KEY\|flutterwave" "Flutterwave payment pattern in api-patterns.md"
 assert_contains "references/api-patterns.md" "Whereby\|WHEREBY_API_KEY\|whereby" "Whereby video room pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "Orange Money\|ORANGE_CLIENT_SECRET\|orange.*money\|orangemoney" "Orange Money pattern in api-patterns.md"
 
 echo ""
 echo "[ SORF — SQL patterns checks (extended) ]"
@@ -191,6 +194,8 @@ assert_contains "references/sql-patterns.md" "gps_pings\|gps_ping"          "GPS
 assert_contains "references/sql-patterns.md" "job_photos\|photo_type"       "Job photos pattern in sql-patterns.md"
 assert_contains "references/sql-patterns.md" "daterange.*EXCLUDE\|EXCLUDE.*daterange\|rental_period" "daterange EXCLUDE USING gist in sql-patterns.md"
 assert_contains "references/sql-patterns.md" "class_sessions\|enroll_in_class\|FOR UPDATE" "Class session capacity pattern in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "multi.*currency\|supported_currency\|payment_provider.*enum\|fx_rate" "Multi-currency pattern in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "deliverables\|deliverable_type\|event_packages" "Event deliverables pattern in sql-patterns.md"
 
 echo ""
 echo "[ Output template — vertical-specific tables ]"
@@ -220,10 +225,10 @@ fi
 
 # At least 14 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 22 ]]; then
-  check "evals.json has at least 22 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 24 ]]; then
+  check "evals.json has at least 24 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 22 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 24 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -245,10 +250,10 @@ import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 240 ]]; then
-  check "evals.json has at least 240 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 260 ]]; then
+  check "evals.json has at least 260 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 240 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 260 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present

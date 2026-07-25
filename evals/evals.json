@@ -1475,11 +1475,147 @@
           "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
         }
       ]
+    },
+    {
+      "id": "eval-025",
+      "name": "Event photography booking marketplace (Nigeria)",
+      "prompt": "Build ShutterBook — an event photography and videography booking platform for Nigeria. Event hosts book photographers and videographers for weddings, corporate events, and birthdays. Package-based pricing, 40% deposit at booking, deliverables tracking (photos + highlight reel). Paystack payments, Termii SMS, portfolio galleries for each photographer.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a025-01",
+          "description": "SORF booking status enum all 9 states",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a025-02",
+          "description": "Event packages table with price",
+          "check": "Section 3 contains 'event_packages' or package-based pricing table with price field"
+        },
+        {
+          "id": "a025-03",
+          "description": "Deliverables tracking table",
+          "check": "Section 3 contains 'deliverables' table with status tracking for photos or video"
+        },
+        {
+          "id": "a025-04",
+          "description": "Portfolio items table for photographer galleries",
+          "check": "Section 3 contains 'portfolio_items' or portfolio table for photographer media"
+        },
+        {
+          "id": "a025-05",
+          "description": "EXCLUDE USING gist prevents double-booking of photographers",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for photographer slot conflict prevention"
+        },
+        {
+          "id": "a025-06",
+          "description": "availability_windows for photographer schedules",
+          "check": "Section 3 contains 'availability_windows' for staff or photographer scheduling"
+        },
+        {
+          "id": "a025-07",
+          "description": "held_until for 15-minute slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a025-08",
+          "description": "Paystack HMAC webhook verification",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a025-09",
+          "description": "branch_kpis or studio_kpis materialised view",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' or 'kpis' materialised view"
+        },
+        {
+          "id": "a025-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and TERMII_API_KEY in env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and 'TERMII_API_KEY'"
+        },
+        {
+          "id": "a025-11",
+          "description": "Real NGN package pricing in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) for photography or videography packages"
+        },
+        {
+          "id": "a025-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-026",
+      "name": "Multi-country logistics SaaS (Côte d'Ivoire + Senegal)",
+      "prompt": "Design ParcelRun Francophone — a last-mile parcel delivery platform for Côte d'Ivoire and Senegal. Couriers pick up parcels from businesses and deliver to consumers. Payments via Orange Money (XOF). USSD booking for feature-phone users via Africa's Talking. Bilingual SMS (French + English). Track couriers via GPS pings. Full 11-section architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a026-01",
+          "description": "SORF booking status enum all 9 states",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a026-02",
+          "description": "Orange Money XOF payment integration",
+          "check": "Section 4 or Section 7 or Section 2 contains 'Orange Money' or 'XOF' or 'orange' payment integration"
+        },
+        {
+          "id": "a026-03",
+          "description": "USSD session flow via Africa's Talking",
+          "check": "Section 4 or Section 6 or Section 7 contains 'USSD' and (\"Africa's Talking\" or 'AfricasTalking')"
+        },
+        {
+          "id": "a026-04",
+          "description": "Bilingual SMS templates (French + English)",
+          "check": "Section 7 or Section 4 contains bilingual or 'fr' or 'French' SMS templates"
+        },
+        {
+          "id": "a026-05",
+          "description": "GPS pings for courier tracking",
+          "check": "Section 3 contains 'gps_pings' or GPS tracking for couriers"
+        },
+        {
+          "id": "a026-06",
+          "description": "EXCLUDE USING gist for courier slot conflict",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for courier scheduling"
+        },
+        {
+          "id": "a026-07",
+          "description": "availability_windows for courier schedules",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a026-08",
+          "description": "branch_kpis materialised view",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a026-09",
+          "description": "held_until for slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a026-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and Orange Money env vars in Section 8",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and ('ORANGE_CLIENT_SECRET' or 'ORANGE_MERCHANT_KEY' or 'ORANGE')"
+        },
+        {
+          "id": "a026-11",
+          "description": "Real XOF pricing in Section 9",
+          "check": "Section 9 contains specific XOF or FCFA amounts for delivery pricing"
+        },
+        {
+          "id": "a026-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 24 cases pass. Target: 24 cases, 255 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 26 cases pass. Target: 26 cases, 279 assertions."
   }
 }

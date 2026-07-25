@@ -287,6 +287,44 @@ Special rules:
 - `automation_jobs` includes a `balance_payment_link` job triggered after weigh-in to send the final amount via Termii SMS
 - Rider ETA SMS: when GPS ping brings rider within 2km of pickup, fire `rider_eta_sms` automation job
 
+### Event Photography & Creative Services
+**When to apply**: photographers, videographers, DJs, MCs, makeup artists, event decorators, cinematographers — any creative professional booked per-event rather than per-hour-slot.
+
+Key differences from standard appointment booking:
+- Bookings are typically **full-day or multi-day** events — model `starts_at` and `ends_at` spanning the event; use the same `EXCLUDE USING gist` on `tstzrange` but with wider windows (8-12h)
+- **Package-based pricing**: fixed packages (e.g. "Wedding Standard: 8h coverage, 500 edited photos, 1 highlight reel") stored in an `event_packages` table with a flat `price_kobo bigint`; no per-minute billing
+- **Deposit/escrow flow**: High-value bookings (typically ₦200k+) use a split payment model — 40% deposit at booking, 30% at event start, 30% within 48h of deliverable delivery; store each tranche as a separate `payment_transactions` row
+- **Deliverables tracking**: `deliverables` table tracks what was promised (photos count, video duration, album) vs what was delivered; booking is only `completed` when all deliverables are marked `delivered`
+- **Creative portfolio**: `portfolio_items` table — `staff_id`, `media_type` enum (`'photo'|'video'|'reel'`), `storage_path text`, `event_type text` (wedding/corporate/birthday), `is_featured bool`; public read for discovery, staff-only write
+
+Additional tables:
+- `event_packages`: `name text`, `description text`, `duration_hours int`, `price_kobo bigint`, `deliverables_summary jsonb`, `is_active bool`
+- `deliverables`: `booking_id uuid FK`, `deliverable_type text`, `promised_count int`, `delivered_count int DEFAULT 0`, `status` enum (`'pending'|'in_progress'|'delivered'|'disputed'`), `delivery_deadline timestamptz`, `storage_paths text[]`
+- `portfolio_items`: `staff_id uuid FK`, `media_type` enum, `storage_path text`, `thumbnail_path text`, `event_type text`, `taken_at date`, `is_featured bool DEFAULT false`
+- `event_quotes`: for large custom events — `booking_id`, `quoted_amount_kobo bigint`, `valid_until timestamptz`, `status` enum (`'pending'|'accepted'|'rejected'|'expired'`)
+
+Special rules:
+- Deliverables gate completion: booking status cannot transition to `completed` until all `deliverables.status = 'delivered'` — enforce this in the Edge Function, not just application code
+- Portfolio storage bucket: **PUBLIC** for thumbnails (SEO and discovery), **PRIVATE** for full-resolution originals; serve originals via signed URLs only
+- High-value escrow: For bookings > configurable threshold, use Paystack's `subaccount` split to hold funds on platform; auto-release to creative after delivery confirmation
+- Quote flow: For bespoke events without a standard package, insert `event_quotes`; slot hold only starts on quote acceptance
+- Cancellation policy is strict for event dates: charge 50% if cancelled ≤ 14 days before event; charge 100% if ≤ 48h before event
+
+### Pet Services & Veterinary
+**When to apply**: pet grooming salons, veterinary clinics, pet day care, pet boarding, mobile vet services, animal shelters.
+
+Key additions on top of base SORF tables:
+- `pet_profiles`: `owner_id uuid FK`, `name text`, `species` enum (`'dog'|'cat'|'bird'|'rabbit'|'other'`), `breed text`, `date_of_birth date`, `weight_kg numeric(5,2)`, `microchip_id text`, `photo_path text` (private bucket)
+- `vaccine_records`: `pet_id uuid FK`, `booking_id uuid FK`, `issued_by uuid FK` (must be vet), `vaccine_name text`, `batch_number text`, `administered_at timestamptz`, `next_due_at timestamptz`, `certificate_path text` (private bucket — signed URLs), `status` enum (`'issued'|'due'|'overdue'|'revoked'`)
+- `health_notes`: `pet_id uuid FK`, `booking_id uuid FK`, `written_by uuid FK`, `content text`, `attachments text[]` — **no UPDATE/DELETE** (health notes are immutable once written)
+
+Special rules:
+- **VCNV constraint**: `staff` table must have `vcnv_number IS NOT NULL` for `role = 'vet'` — enforce via CHECK constraint; admin verifies during onboarding
+- Vaccine status automation: `pg_cron` daily job updates `vaccine_records.status = 'overdue'` where `next_due_at < now() AND status = 'issued'`
+- `automation_jobs` includes `vaccine_due_reminder` type, scheduled at `next_due_at - 7 days`, with Termii SMS alert to owner
+- Health records bucket: **PRIVATE** — 15-minute signed URLs only; never return public URLs for certificates or health notes
+- Pet ownership RLS: owners can only SELECT their own `pet_profiles` and `vaccine_records`; vets can SELECT all pets they have a booking with
+
 ---
 
 ## Output Format
