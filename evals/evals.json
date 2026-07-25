@@ -669,11 +669,147 @@
           "check": "output contains '## Assumptions Made' and mentions Kenya and ('Uganda' or 'Tanzania')"
         }
       ]
+    },
+    {
+      "id": "eval-013",
+      "name": "Telemedicine and in-clinic appointment platform (Nigeria)",
+      "prompt": "Design a telemedicine and in-clinic appointment booking platform for Nigeria called MedConnect. Patients book video consultations or in-person visits with licensed GPs, dermatologists, cardiologists, and pediatricians. Doctors set their own weekly availability windows. Patients pay a consultation deposit via Paystack before the slot is confirmed. VIP wellness members earn wellness points per consultation. No-show policy applies after 3 missed appointments. Multi-specialty clinic groups manage multiple branches and doctors under one account. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a013-01",
+          "description": "SORF 9-state booking lifecycle including held and checked_in",
+          "check": "Section 3 contains 'held' and 'checked_in' as distinct booking_status enum values"
+        },
+        {
+          "id": "a013-02",
+          "description": "availability_windows table for doctor scheduling",
+          "check": "Section 3 contains 'availability_windows' with day_of_week and start_time columns"
+        },
+        {
+          "id": "a013-03",
+          "description": "EXCLUDE USING gist for doctor slot conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist' scoped to staff_id or doctor_id for booking conflict prevention"
+        },
+        {
+          "id": "a013-04",
+          "description": "Paystack deposit collected before booking is confirmed",
+          "check": "Section 3 or Section 4 describes Paystack deposit flow with booking 'held' → 'confirmed' on payment"
+        },
+        {
+          "id": "a013-05",
+          "description": "Video consultation infrastructure mentioned",
+          "check": "Section 2 or Section 3 or Section 4 mentions video consultation room (Whereby or equivalent)"
+        },
+        {
+          "id": "a013-06",
+          "description": "No-show policy with prepayment requirement after 3 missed appointments",
+          "check": "Section 3 or Section 7 contains no_show_policy or require_prepayment with a count threshold"
+        },
+        {
+          "id": "a013-07",
+          "description": "Wellness loyalty points system present",
+          "check": "Section 3 contains 'loyalty_accounts' or 'loyalty_transactions' or 'wellness points'"
+        },
+        {
+          "id": "a013-08",
+          "description": "Deposit policy stored as jsonb on businesses table",
+          "check": "Section 3 contains 'deposit_policy' as jsonb on businesses or tenant table"
+        },
+        {
+          "id": "a013-09",
+          "description": "Webhook HMAC verification for Paystack",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a013-10",
+          "description": "branch_kpis materialised view for multi-branch clinic analytics",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a013-11",
+          "description": "No placeholder text in output",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a013-12",
+          "description": "Assumptions block present with Nigeria / NGN / Paystack context",
+          "check": "output contains '## Assumptions Made' and mentions Nigeria or NGN or Paystack"
+        }
+      ]
+    },
+    {
+      "id": "eval-014",
+      "name": "Wellness spa franchise with USSD fallback (Francophone West Africa)",
+      "prompt": "Design a wellness spa and beauty salon franchise platform called BellaSpa for Côte d'Ivoire and Senegal. Franchisees operate individual spas under the BellaSpa brand; customers book massages, facials, body treatments, and hair services. Payments via Orange Money (XOF). SMS sent in French. Feature-phone customers use USSD to check appointment status and receive booking confirmations. Franchise owners see consolidated KPI dashboards across all spas. Therapists set their weekly availability. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a014-01",
+          "description": "Orange Money (XOF) as primary payment provider",
+          "check": "Section 2 or Section 3 or Section 8 contains 'Orange Money' and 'XOF'"
+        },
+        {
+          "id": "a014-02",
+          "description": "French-language SMS templates for Côte d'Ivoire and Senegal",
+          "check": "Section 7 or Section 2 mentions French SMS templates or locale 'fr-CI' or 'fr-SN'"
+        },
+        {
+          "id": "a014-03",
+          "description": "USSD handler for feature-phone customers",
+          "check": "Section 3 or Section 4 or Section 5 contains 'USSD' for appointment status or booking flow"
+        },
+        {
+          "id": "a014-04",
+          "description": "Africa's Talking USSD or SMS gateway for Francophone West Africa",
+          "check": "Section 2 or Section 8 mentions Africa's Talking or Orange Money USSD gateway"
+        },
+        {
+          "id": "a014-05",
+          "description": "availability_windows for therapist weekly scheduling",
+          "check": "Section 3 contains 'availability_windows' with day_of_week column for therapist scheduling"
+        },
+        {
+          "id": "a014-06",
+          "description": "SORF booking states present in schema",
+          "check": "Section 3 contains 'booking_status' enum with at least confirmed, cancelled, no_show"
+        },
+        {
+          "id": "a014-07",
+          "description": "branch_kpis or franchise analytics for franchise owner dashboard",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' or franchise analytics view"
+        },
+        {
+          "id": "a014-08",
+          "description": "EXCLUDE USING gist for therapist slot conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for booking conflict prevention"
+        },
+        {
+          "id": "a014-09",
+          "description": "XOF amounts in Section 9 monetization (no placeholder rates)",
+          "check": "Section 9 contains at least one specific XOF amount for fees or subscriptions"
+        },
+        {
+          "id": "a014-10",
+          "description": "No placeholder text in output",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a014-11",
+          "description": "deposit_policy jsonb on businesses for franchise deposit configuration",
+          "check": "Section 3 contains 'deposit_policy' as jsonb on businesses or tenants table"
+        },
+        {
+          "id": "a014-12",
+          "description": "Assumptions block with Francophone West Africa context",
+          "check": "output contains '## Assumptions Made' and mentions Côte d'Ivoire or Senegal or XOF"
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 12 cases pass. Target: 12 cases, 113 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 14 cases pass. Target: 14 cases, 137 assertions."
   }
 }

@@ -17,7 +17,7 @@
 
 ## Checklist
 
-- [ ] `bash scripts/validate-skill.sh` passes (87/87 checks green)
+- [ ] `bash scripts/validate-skill.sh` passes (88/88 checks green)
 - [ ] `python3 -c "import json; json.load(open('evals/evals.json'))"` exits 0
 - [ ] No application code at repo root (TypeScript/Python belongs in `examples/`)
 - [ ] No `.env` or credential files staged

@@ -285,17 +285,35 @@ Rules:
 
 Generate the complete schema. No "// add more columns here" placeholders.
 
+**Required SORF core tables — every booking/appointment platform must include all of these by name:**
+
+| Table | Required columns / constraints |
+|---|---|
+| `businesses` | `deposit_policy jsonb`, `cancellation_policy jsonb`, `no_show_policy jsonb`, `tenant_id` |
+| `branches` | FK to `businesses`, `location geography(POINT,4326)`, `name`, `tenant_id` |
+| `staff` | FK to `branches`, `rating numeric(3,2)`, `is_active bool`, `tenant_id` |
+| `services` | FK to `businesses`, `duration_minutes int`, `price_kobo bigint`, `tenant_id` |
+| `availability_windows` | FK to `staff`, `day_of_week int CHECK (0–6)`, `start_time time`, `end_time time` |
+| `availability_overrides` | FK to `staff`, `date date`, `is_available bool`, `start_time time`, `end_time time` |
+| `bookings` | SORF 9-state `booking_status` enum, `EXCLUDE USING gist` on `(staff_id, tstzrange(starts_at, ends_at, '[)'))`, `held_until timestamptz`, `deposit_paid bool` |
+| `waitlist_entries` | FK to `bookings.service_id` or `staff_id`, `customer_id`, `notified_at timestamptz`; trigger on booking cancellation |
+| `loyalty_accounts` | FK to `customers`/`users`, `points_balance int`, `tier text` |
+| `loyalty_transactions` | FK to `loyalty_accounts`, `points_delta int`, `booking_id`, idempotency key |
+| `branch_kpis` | Materialised view on `branches`; refresh every 15 min via pg_cron (multi-branch platforms) |
+
 Structure:
 1. Extensions block (`uuid-ossp`, `pgcrypto`, `pg_trgm`, `postgis`, `pg_cron`, `btree_gist`)
-2. Enum definitions
+2. Enum definitions (include `booking_status` with all 9 SORF states: `pending`, `confirmed`, `held`, `checked_in`, `in_progress`, `completed`, `cancelled`, `no_show`, `disputed`)
 3. Helper functions (`current_user_tenant_id()`, `update_updated_at()`, `is_super_admin()`)
 4. Core tables (tenants, users, role-specific profiles)
-5. Domain tables (whatever the platform needs)
-6. Transaction/payment tables (include deposit columns where applicable)
-7. Automation, notification, and audit tables
-8. RLS policies (grouped by table)
-9. Indexes (grouped by table)
-10. Seed data (default tenant, admin user template)
+5. Domain tables (businesses, branches, staff, services, the platform's specialty tables)
+6. Booking tables (availability_windows, availability_overrides, bookings, waitlist_entries)
+7. Loyalty and membership tables (loyalty_accounts, loyalty_transactions, memberships)
+8. Transaction/payment tables (include deposit columns where applicable)
+9. Automation, notification, and audit tables
+10. RLS policies (grouped by table)
+11. Indexes (grouped by table)
+12. Seed data (default tenant, admin user template)
 
 ---
 

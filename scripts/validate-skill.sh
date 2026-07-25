@@ -71,6 +71,7 @@ assert_file_exists "evals/evals.json"
 assert_file_exists "CLAUDE.md"
 assert_file_exists "README.md"
 assert_file_exists "CONTRIBUTING.md"
+assert_file_exists ".github/PULL_REQUEST_TEMPLATE.md"
 
 # ── 2. SKILL.md — all 11 section headers present ────────────────────────────
 echo ""
@@ -186,12 +187,12 @@ else
   check "evals.json is valid JSON" "fail" "JSON parse error"
 fi
 
-# At least 10 cases
+# At least 12 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 10 ]]; then
-  check "evals.json has at least 10 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 12 ]]; then
+  check "evals.json has at least 12 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 10 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 12 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -207,16 +208,16 @@ else
   check "Every eval case has assertions" "fail" "$CASES_WITHOUT_ASSERTIONS case(s) have no assertions"
 fi
 
-# Total assertion count >= 60
+# Total assertion count >= 120
 ASSERTION_COUNT=$(python3 -c "
 import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 60 ]]; then
-  check "evals.json has at least 60 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 120 ]]; then
+  check "evals.json has at least 120 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 60 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 120 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present

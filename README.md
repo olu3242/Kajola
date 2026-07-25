@@ -128,14 +128,17 @@ kajola/
 │   ├── output-template.md          # Structured output template for all 11 sections
 │   └── api-patterns.md             # Edge Function patterns: HMAC, M-Pesa, AT SMS, offline queue
 ├── evals/
-│   └── evals.json                  # 12 test cases, 113 assertions
+│   └── evals.json                  # 14 test cases, 137 assertions
+├── supabase/
+│   └── migrations/                 # Reference migrations (SORF baseline schema)
 └── examples/
     ├── README.md                   # Examples index
     ├── kajola-artisan-platform.md  # Artisan booking marketplace — Nigeria (Paystack + Termii)
     ├── toolhire-pro-nigeria.md     # Equipment rental marketplace — Nigeria (Paystack)
     ├── boda-connect-kenya.md       # Boda-boda dispatch — Kenya (M-Pesa + Africa's Talking + USSD)
     ├── parcelrun-ghana-ci.md       # Micro-logistics — Ghana + Côte d'Ivoire (MTN + Orange Money, bilingual)
-    └── glamplus-beauty-kenya.md    # Beauty salon chain — Kenya (M-Pesa deposit + SORF + loyalty + waitlist)
+    ├── glamplus-beauty-kenya.md    # Beauty salon chain — Kenya (M-Pesa deposit + SORF + loyalty + waitlist)
+    └── medconnect-telemedicine-nigeria.md  # Telemedicine platform — Nigeria (Paystack + Termii + Whereby)
 ```
 
 ---

@@ -96,6 +96,26 @@ What's inside:
 
 ---
 
+### `medconnect-telemedicine-nigeria.md`
+**Prompt**: "Design a telemedicine and in-clinic appointment booking platform for Nigeria called MedConnect. Patients book video consultations or in-person visits with licensed GPs, dermatologists, cardiologists, and pediatricians. Doctors set their own weekly availability windows. Patients pay a consultation deposit via Paystack before the slot is confirmed. VIP wellness members earn wellness points per consultation. No-show policy applies after 3 missed appointments. Multi-specialty clinic groups manage multiple branches and doctors under one account. Full system architecture."
+
+**Market**: Nigeria · **Currency**: NGN · **Payments**: Paystack · **Auth**: Phone OTP (Termii) · **Video**: Whereby Embedded · **SORF**: Full lifecycle including telemedicine
+
+What's inside:
+- PRD with 3 personas (patient Chidi, doctor Dr. Ngozi, clinic admin Emeka) and 15 features including USSD appointment status (P2)
+- Architecture: Expo + Next.js + Supabase + Whereby + Paystack + Termii — 12-service inventory
+- Full Postgres schema — 20+ tables including `doctor_profiles` with `mdcn_number` verification, `medical_specialty` enum, `appointment_type` enum (video/in_person), SORF 9-state `booking_status`, `EXCLUDE USING gist` on `(staff_id, branch_id)`, `availability_windows` + `availability_overrides`, `waitlist_entries` with cancellation trigger, `loyalty_accounts` + `loyalty_transactions`, `branch_kpis` materialised view
+- `businesses.deposit_policy` (50% default), `cancellation_policy` (free >24h), `no_show_policy` (3 strikes → prepayment) as jsonb
+- 10 API endpoints: send-otp, verify-otp, search-doctors (PostGIS), book-slot (SORF held), Paystack HMAC webhook, PATCH booking status (doctor-driven), credit-loyalty (idempotent), join-video (Whereby room), branch-kpis
+- SORF state machine: `pending → held → confirmed → checked_in → in_progress → completed | cancelled | no_show | disputed`
+- 16 automation events including `video.room_created`, `ai.rebook_nudge` (WhatsApp 90-day follow-up), `ai.noshow_risk` daily scoring
+- 8 pg_cron jobs: hold expiry (5 min), no-show check (15 min), 24h/2h reminders, KPI refresh, batch payouts, AI scoring (22:00), rebook nudges (09:00)
+- Monetization in NGN: 10% commission, Solo Pro ₦5,000/mo, Clinic ₦15,000/mo, Enterprise ₦50,000/mo; projections to ₦18.7M MRR at 10k consultations/month
+- Scaling: Supabase Pro → Team → Enterprise; Kenya expansion with M-Pesa + Africa's Talking at 1M consultations
+- Quarterly roadmap: Q1 2027 Lagos launch → Q2 loyalty + Clinic subscriptions → Q3 AI operations → Q1 2028 Kenya
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:

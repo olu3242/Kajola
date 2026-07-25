@@ -18,13 +18,17 @@ references/sql-patterns.md      Reusable Postgres patterns: SORF booking tables,
                                 MoMo transactions, USSD sessions, SMS logs, idempotency
 references/output-template.md   Formatting guide for all 11 sections + SORF enum/domain tables + market variants + currency table
 references/api-patterns.md      Edge Function patterns (HMAC, M-Pesa STK/B2C, Africa's Talking SMS+USSD, offline queue)
-evals/evals.json                Test cases — 12 scenarios, 113 assertions
+evals/evals.json                Test cases — 14 scenarios, 137 assertions
+supabase/migrations/20260725000002_sorf_reference_schema.sql
+                                Canonical SORF baseline migration — reference schema for generated platforms
 examples/                       Full generated outputs (reference / demo)
   kajola-artisan-platform.md    Nigeria — Paystack + Termii
   toolhire-pro-nigeria.md       Nigeria — Paystack + equipment rental
   boda-connect-kenya.md         Kenya — M-Pesa Daraja + Africa's Talking + USSD
   parcelrun-ghana-ci.md         Ghana + Côte d'Ivoire — MTN MoMo + Orange Money + bilingual
   glamplus-beauty-kenya.md      Kenya — M-Pesa deposit + SORF full lifecycle + loyalty + waitlist + franchise
+  medconnect-telemedicine-nigeria.md
+                                Nigeria — Paystack + Termii + Whereby (telemedicine) + SORF healthcare lifecycle
 CONTRIBUTING.md                 Guide for community contributors
 ```
 
