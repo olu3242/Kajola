@@ -229,6 +229,24 @@ What's inside:
 
 ---
 
+### [`doclink-telemedicine-ghana.md`](./doclink-telemedicine-ghana.md)
+
+**Markets**: Ghana (GHS) · **Payments**: MTN Mobile Money (HMAC-SHA-256 webhook) · **Auth**: Phone OTP (Africa's Talking) · **Vertical**: Multi-specialty telemedicine
+
+What's inside:
+- Video consultations: Whereby Embedded rooms created automatically on `booking.confirmed`; `whereby_meeting_id`, `whereby_room_url` (patient), `whereby_host_url` (doctor) stored on bookings; rooms deleted on cancellation/no-show
+- USSD booking for feature phones: `ussd_sessions` table with Africa's Talking state machine; `menu_state` enum (main/select_specialty/select_doctor/confirm_slot/confirm_payment); 90-second TTL; `pg_cron` expires stale sessions every 5 min
+- `prescription_records`: per-consultation Rx with `drugs jsonb`, `diagnosis`, `valid_until GENERATED ALWAYS AS (issued_at + interval '30 days')`; private PDF stored in Supabase Storage `medical-records` bucket; signed URL (5-min TTL) returned via API
+- `health_notes`: immutable per-visit clinical notes (no `updated_at`, no UPDATE/DELETE endpoints); doctor ownership enforced by RLS
+- GMC constraint: `staff.gmc_number IS NOT NULL` enforced by CHECK constraint for `role = 'doctor'`; GMC = Ghana Medical and Dental Council
+- `appointment_type` enum: `video | in_person | home_visit | ussd_phone`; `doctor_specialty` enum: 8 specialties (GP, dermatology, mental_health, paediatrics, cardiology, gynaecology, ophthalmology, orthopaedics)
+- MTN Mobile Money HMAC-SHA-256: `createHmac('sha256', MTN_MNO_SUBSCRIPTION_KEY).update(rawBody).digest('hex')` compared against `X-Callback-Signature` header
+- `branch_kpis` matview with video vs USSD consultation count split
+- Full automation suite: 24h + 2h reminders, Whereby room creation, post-consultation rating prompt, prescription ready SMS
+- GHS pricing: GH₵80 GP video · GH₵120 dermatology · GH₵180 mental health · GH₵200 specialist; 12% platform fee; ₵8,640/day MRR at steady state
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:

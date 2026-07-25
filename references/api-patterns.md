@@ -1200,3 +1200,157 @@ async function getOrangeMoneyTransactionStatus(
 ```
 
 Required env vars: `ORANGE_CLIENT_ID`, `ORANGE_CLIENT_SECRET`, `ORANGE_MERCHANT_KEY`, `ORANGE_NOTIF_TOKEN`, `ORANGE_API_BASE_URL`
+
+---
+
+## Expo Push Notifications
+
+Send push notifications to Expo-managed React Native apps (Android + iOS).
+
+```typescript
+// packages/api/src/push.ts — shared across all Edge Functions
+
+interface PushMessage {
+  to: string;          // Expo push token (ExponentPushToken[...])
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+  sound?: 'default' | null;
+  badge?: number;
+  channelId?: string;  // Android channel (e.g. 'bookings', 'reminders')
+  priority?: 'default' | 'normal' | 'high';
+}
+
+interface PushReceipt {
+  status: 'ok' | 'error';
+  id?: string;
+  message?: string;
+  details?: { error?: string };
+}
+
+const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
+
+export async function sendExpoPushNotification(
+  messages: PushMessage[]
+): Promise<PushReceipt[]> {
+  const res = await fetch(EXPO_PUSH_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'Accept-Encoding': 'gzip, deflate',
+      Authorization: `Bearer ${Deno.env.get('EXPO_ACCESS_TOKEN') ?? ''}`,
+    },
+    body: JSON.stringify(messages),
+  });
+
+  const { data } = await res.json();
+  return data as PushReceipt[];
+}
+
+// Convenience: single push to one device
+export async function pushOne(
+  expoPushToken: string,
+  title: string,
+  body: string,
+  data?: Record<string, unknown>
+): Promise<void> {
+  if (!expoPushToken?.startsWith('ExponentPushToken')) return;
+  const [receipt] = await sendExpoPushNotification([
+    { to: expoPushToken, title, body, data, sound: 'default', priority: 'high' },
+  ]);
+  if (receipt?.status === 'error') {
+    console.error('Expo push failed:', receipt.message, receipt.details);
+  }
+}
+```
+
+**Usage in Edge Functions (e.g. booking confirmation)**:
+```typescript
+// After booking confirmed, push to both parties
+await Promise.all([
+  pushOne(customer.expo_push_token, 'Booking Confirmed!', `Your appointment at ${branch.name} is set.`, { booking_id }),
+  pushOne(staff.expo_push_token, 'New Booking', `${customer.full_name} booked for ${format(starts_at, 'h:mma')}.`, { booking_id }),
+]);
+```
+
+**DB column**: add `expo_push_token text` to the `profiles` table (nullable; updated from mobile app on login/focus).
+
+Required env var: `EXPO_ACCESS_TOKEN` (Expo account → Access Tokens; optional but rate-limit-safe for production).
+
+---
+
+## Supabase Storage — Signed URL Helper
+
+Generate short-lived signed URLs for private bucket files (medical records, prescriptions, job photos, pet health notes).
+
+```typescript
+// supabase/functions/_shared/storage.ts
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const adminClient = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+);
+
+/**
+ * Generate a signed URL for a private Supabase Storage file.
+ * @param bucket  Bucket name (e.g. 'medical-records', 'job-photos')
+ * @param path    File path within the bucket
+ * @param expiresIn  Seconds until expiry (default 300 = 5 min)
+ */
+export async function getSignedUrl(
+  bucket: string,
+  path: string,
+  expiresIn = 300
+): Promise<string> {
+  const { data, error } = await adminClient.storage
+    .from(bucket)
+    .createSignedUrl(path, expiresIn);
+
+  if (error || !data?.signedUrl) {
+    throw new Error(`Signed URL error for ${bucket}/${path}: ${error?.message}`);
+  }
+  return data.signedUrl;
+}
+
+/**
+ * Upload a file to a private bucket and return the storage path.
+ * Used for prescription PDFs, job before/after photos, vaccine certs.
+ */
+export async function uploadPrivateFile(
+  bucket: string,
+  path: string,
+  body: Uint8Array | Blob,
+  contentType: string
+): Promise<string> {
+  const { error } = await adminClient.storage
+    .from(bucket)
+    .upload(path, body, { contentType, upsert: false });
+
+  if (error) throw new Error(`Upload error for ${bucket}/${path}: ${error.message}`);
+  return path;
+}
+```
+
+**Usage**:
+```typescript
+// Return signed URL for a prescription PDF (5-min expiry)
+const url = await getSignedUrl('medical-records', `prescriptions/${prescriptionId}.pdf`, 300);
+
+// Upload job completion photo
+const path = await uploadPrivateFile(
+  'job-photos',
+  `jobs/${jobId}/after-${Date.now()}.jpg`,
+  imageBytes,
+  'image/jpeg'
+);
+```
+
+**Bucket policies (Supabase dashboard)**:
+- Set bucket to **PRIVATE** — never public
+- RLS policies on `storage.objects`: tenant must own the object (match `metadata->>'tenant_id'` or use a mapping table)
+- Prefer short expiry (300s) for sensitive documents; use 3600s for app-session contexts only
+
+Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`

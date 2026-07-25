@@ -128,7 +128,7 @@ kajola/
 │   ├── output-template.md          # Structured output template for all 11 sections
 │   └── api-patterns.md             # Edge Function patterns: HMAC, M-Pesa, AT SMS, offline queue
 ├── evals/
-│   └── evals.json                  # 26 test cases, 279 assertions
+│   └── evals.json                  # 28 test cases, 303 assertions
 ├── supabase/
 │   ├── migrations/                 # Reference migrations (SORF baseline schema)
 │   └── functions/
@@ -151,7 +151,8 @@ kajola/
     ├── sparkwash-nigeria-ghana.md  # Car wash chain — Nigeria + Ghana (Paystack + MTN MoMo + Recurring memberships)
     ├── cutculture-barbershop-nigeria.md  # Barbershop franchise — Nigeria (Paystack + Termii + 5-stamp loyalty + franchise royalty)
     ├── cleanrun-laundry-nigeria.md       # Laundry pickup & delivery — Nigeria (GPS dispatch + job photos + weight-based pricing)
-    └── pawperfect-pet-nigeria.md         # Pet grooming & vet clinic — Nigeria (vaccine records + health notes + per-pet booking)
+    ├── pawperfect-pet-nigeria.md         # Pet grooming & vet clinic — Nigeria (vaccine records + health notes + per-pet booking)
+    └── doclink-telemedicine-ghana.md     # Multi-specialty telemedicine — Ghana (MTN MoMo + Africa's Talking + Whereby + USSD)
 ```
 
 ---

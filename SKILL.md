@@ -180,6 +180,29 @@ Apply these patterns automatically to every platform generated:
 
 ## Vertical-Specific Schema Patterns
 
+### Quick Vertical Selection Guide
+
+Use this table to identify the correct vertical pattern(s) before generating Section 3. Platforms often combine two verticals (e.g. pet clinic + grooming → Healthcare + Pet Services).
+
+| If the platform does… | Apply vertical pattern |
+|---|---|
+| Doctor/clinic consultations, telemedicine, diagnostics | **Healthcare & Telemedicine** |
+| Fitness classes, gym memberships, personal training | **Fitness & Gym / Class-Based** |
+| Home repairs, plumbers, electricians, cleaning | **Home Services / On-Demand Dispatch** |
+| Equipment hire, vehicle rental, tool leasing | **Equipment / Vehicle Rental** |
+| Courier, boda-boda dispatch, last-mile delivery | **Logistics / Delivery Dispatch** |
+| Laundry pickup + delivery, dry cleaning | **Laundry / Pickup-Delivery** |
+| Wedding photography, events, creative shoots | **Event Photography & Creative Services** |
+| Pet grooming, vet clinic, boarding | **Pet Services & Veterinary** |
+| Barber, beauty salon, nail tech, spa | Core SORF only (no extra vertical) |
+| Car wash, detailing | Core SORF + walk-in queue |
+
+**Booking type decision**:
+- Staff + time slot (most platforms) → `EXCLUDE USING gist` on `(staff_id, branch_id, tstzrange)`
+- Equipment/vehicle over days → `EXCLUDE USING gist` on `(asset_id, daterange)` (see Equipment/Vehicle Rental vertical)
+- Fitness class with capacity → `class_sessions` + row-level `FOR UPDATE` (see Fitness vertical)
+- Laundry (rider assigned later) → conditional `EXCLUDE USING gist WHERE rider_id IS NOT NULL`
+
 When the platform's domain matches one of these verticals, apply the additional patterns below on top of the Africa-first defaults. The base SORF invariants (`availability_windows`, `EXCLUDE USING gist`, `waitlist_entries`, `loyalty_accounts`, `branch_kpis`) are always required — these patterns extend them, they do not replace them.
 
 ### Healthcare & Telemedicine

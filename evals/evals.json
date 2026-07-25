@@ -1611,11 +1611,147 @@
           "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
         }
       ]
+    },
+    {
+      "id": "eval-027",
+      "name": "Catering & food service booking — Nigeria",
+      "prompt": "Design the full system architecture for CaterPro — a catering and food service booking platform for Nigeria. Event planners book caterers for weddings, corporate events, and parties. Caterers set menus, package prices, and availability by date. Paystack for payments. Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a027-01",
+          "description": "EXCLUDE USING gist for caterer date conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for caterer or date-based booking conflict"
+        },
+        {
+          "id": "a027-02",
+          "description": "Event packages or menu packages table",
+          "check": "Section 3 contains 'event_packages' or 'menu_packages' or 'catering_packages'"
+        },
+        {
+          "id": "a027-03",
+          "description": "Deposit policy for catering bookings",
+          "check": "Section 3 or Section 4 contains 'deposit_policy' for large catering deposits"
+        },
+        {
+          "id": "a027-04",
+          "description": "Paystack payment integration",
+          "check": "Section 7 or Section 8 contains 'Paystack' and ('PAYSTACK_SECRET_KEY' or 'x-paystack-signature')"
+        },
+        {
+          "id": "a027-05",
+          "description": "Termii or AT SMS for OTP and reminders",
+          "check": "Section 8 contains 'TERMII_API_KEY' or 'AT_API_KEY'"
+        },
+        {
+          "id": "a027-06",
+          "description": "All 9 SORF booking states present",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'checked_in', 'in_progress', 'completed', 'cancelled', 'no_show', 'disputed'"
+        },
+        {
+          "id": "a027-07",
+          "description": "availability_windows for caterer schedules",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a027-08",
+          "description": "waitlist_entries table",
+          "check": "Section 3 contains 'waitlist_entries'"
+        },
+        {
+          "id": "a027-09",
+          "description": "branch_kpis materialised view",
+          "check": "Section 3 contains 'branch_kpis'"
+        },
+        {
+          "id": "a027-10",
+          "description": "loyalty_accounts for repeat clients",
+          "check": "Section 3 contains 'loyalty_accounts'"
+        },
+        {
+          "id": "a027-11",
+          "description": "Real NGN pricing in Section 9",
+          "check": "Section 9 contains specific NGN or ₦ amounts for catering packages and commission"
+        },
+        {
+          "id": "a027-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-028",
+      "name": "Multi-location cleaning franchise — Nigeria + Ghana",
+      "prompt": "Build the complete system architecture for SparkClean Pro — a multi-location professional cleaning franchise operating in Nigeria and Ghana. Businesses book cleaners for homes and offices. Multi-staff scheduling, GPS dispatch, before/after photo evidence, Paystack (NGN) and MTN Mobile Money (GHS). Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a028-01",
+          "description": "GPS pings table for cleaner dispatch tracking",
+          "check": "Section 3 contains 'gps_pings' table for cleaner location tracking"
+        },
+        {
+          "id": "a028-02",
+          "description": "Job photos table with before/after evidence",
+          "check": "Section 3 contains 'job_photos' with 'photo_type' enum including 'before' and 'after'"
+        },
+        {
+          "id": "a028-03",
+          "description": "MTN Mobile Money for Ghana collections",
+          "check": "Section 7 or Section 8 contains 'MTN' and ('MoMo' or 'Mobile Money') and ('GHS' or 'Ghana')"
+        },
+        {
+          "id": "a028-04",
+          "description": "Paystack for Nigeria collections",
+          "check": "Section 7 or Section 8 contains 'Paystack' and ('NGN' or 'Nigeria')"
+        },
+        {
+          "id": "a028-05",
+          "description": "EXCLUDE USING gist for cleaner scheduling",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for cleaner slot conflict"
+        },
+        {
+          "id": "a028-06",
+          "description": "branch_kpis materialised view for franchise",
+          "check": "Section 3 contains 'branch_kpis'"
+        },
+        {
+          "id": "a028-07",
+          "description": "All 9 SORF booking states",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'in_progress', 'completed', 'cancelled', 'no_show'"
+        },
+        {
+          "id": "a028-08",
+          "description": "Multi-currency support for NGN + GHS",
+          "check": "Section 3 or Section 9 contains ('NGN' and 'GHS') or 'multi-currency'"
+        },
+        {
+          "id": "a028-09",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and MTN env vars in Section 8",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and ('MTN_MNO_API_KEY' or 'MTN_MNO_SUBSCRIPTION_KEY')"
+        },
+        {
+          "id": "a028-10",
+          "description": "availability_windows for cleaner schedules",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a028-11",
+          "description": "Real NGN and GHS pricing in Section 9",
+          "check": "Section 9 contains specific amounts in ₦ or NGN and GH₵ or GHS for cleaning services"
+        },
+        {
+          "id": "a028-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 26 cases pass. Target: 26 cases, 279 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 28 cases pass. Target: 28 cases, 303 assertions."
   }
 }
