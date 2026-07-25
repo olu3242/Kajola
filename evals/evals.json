@@ -281,7 +281,7 @@
           "check": "Section 9 contains at least one specific Naira amount (₦) or percentage with a digit"
         }
       ]
-    }
+    },
     {
       "id": "eval-007",
       "name": "Ride-hailing dispatch with M-Pesa and USSD (Kenya)",
