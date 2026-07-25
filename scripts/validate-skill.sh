@@ -190,6 +190,12 @@ assert_contains "references/sql-patterns.md" "daterange.*EXCLUDE\|EXCLUDE.*dater
 assert_contains "references/sql-patterns.md" "class_sessions\|enroll_in_class\|FOR UPDATE" "Class session capacity pattern in sql-patterns.md"
 
 echo ""
+echo "[ Output template — vertical-specific tables ]"
+assert_contains "references/output-template.md" "Vertical-Specific\|vertical-specific\|gps_pings\|GPS dispatch" "Vertical-specific optional tables section in output-template.md"
+assert_contains "references/output-template.md" "walkin_queue\|walk-in queue"  "Walk-in queue listed in output-template.md"
+assert_contains "references/output-template.md" "rental_bookings\|daterange EXCLUDE" "Equipment/rental pattern listed in output-template.md"
+
+echo ""
 echo "[ Examples — coverage ]"
 EXAMPLE_COUNT=$(ls examples/*.md 2>/dev/null | grep -v "^examples/README.md$" | wc -l)
 if [[ "$EXAMPLE_COUNT" -ge 4 ]]; then
@@ -211,10 +217,10 @@ fi
 
 # At least 14 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 18 ]]; then
-  check "evals.json has at least 18 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 20 ]]; then
+  check "evals.json has at least 20 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 18 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 20 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -236,10 +242,10 @@ import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 200 ]]; then
-  check "evals.json has at least 200 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 220 ]]; then
+  check "evals.json has at least 220 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 200 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 220 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present

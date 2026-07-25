@@ -27,17 +27,9 @@ jobs:
       - name: Run example SORF compliance checks
         run: |
           chmod +x scripts/check-example.sh
-          # Pre-SORF examples were written before check-example.sh existed and do not
-          # include all SORF invariants (availability_windows, branch_kpis, held_until, etc.).
-          # They are preserved as canonical originals. Only examples created after the SORF
-          # standard was established are validated here.
-          SKIP="examples/README.md examples/kajola-artisan-platform.md examples/toolhire-pro-nigeria.md examples/boda-connect-kenya.md examples/parcelrun-ghana-ci.md"
           FAILED=0
           for f in examples/*.md; do
-            if echo "$SKIP" | grep -qF "$f"; then
-              echo "--- Skipping pre-SORF example: $f ---"
-              continue
-            fi
+            [ "$f" = "examples/README.md" ] && continue
             echo "--- Checking $f ---"
             bash scripts/check-example.sh "$f" || FAILED=$((FAILED + 1))
           done

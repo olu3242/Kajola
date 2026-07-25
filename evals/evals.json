@@ -1203,11 +1203,147 @@
           "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
         }
       ]
+    },
+    {
+      "id": "eval-021",
+      "name": "Laundry pickup & delivery SaaS (Nigeria)",
+      "prompt": "Build a laundry pickup-and-delivery platform for Nigeria called CleanRun. Customers schedule pickups via WhatsApp or app. Riders collect, laundry is processed at partner laundromats, then delivered. Need full 11-section system architecture with Paystack, Termii SMS, GPS tracking, before/after photo evidence, and per-order pricing (weight-based).",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a021-01",
+          "description": "SORF booking status enum all 9 states",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a021-02",
+          "description": "GPS pings append-only for rider tracking",
+          "check": "Section 3 contains 'gps_pings' table or GPS tracking for rider dispatch"
+        },
+        {
+          "id": "a021-03",
+          "description": "job_photos for before/after laundry evidence",
+          "check": "Section 3 contains 'job_photos' or before/after photo evidence for laundry condition"
+        },
+        {
+          "id": "a021-04",
+          "description": "EXCLUDE USING gist prevents double-booking of riders",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for rider or slot conflict prevention"
+        },
+        {
+          "id": "a021-05",
+          "description": "Paystack payment with HMAC webhook",
+          "check": "Section 4 or Section 7 contains Paystack and 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a021-06",
+          "description": "Termii SMS for pickup reminders",
+          "check": "Section 4 or Section 7 contains 'Termii' or 'sendTermiiOtp' for SMS notifications"
+        },
+        {
+          "id": "a021-07",
+          "description": "availability_windows for rider schedules",
+          "check": "Section 3 contains 'availability_windows' for rider or staff scheduling"
+        },
+        {
+          "id": "a021-08",
+          "description": "branch_kpis materialised view for laundromat dashboard",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a021-09",
+          "description": "held_until optimistic slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a021-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and TERMII_API_KEY in env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and 'TERMII_API_KEY'"
+        },
+        {
+          "id": "a021-11",
+          "description": "Weight-based pricing with real NGN amounts",
+          "check": "Section 9 contains specific NGN amounts (₦) for laundry pricing (per kg or per item)"
+        },
+        {
+          "id": "a021-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-022",
+      "name": "Multi-specialty telemedicine platform (Ghana)",
+      "prompt": "Design a telemedicine platform for Ghana called DocLink. Patients book video consultations with doctors across specialties (GP, dermatology, mental health). Payments via MTN Mobile Money (GHS) and card. Prescriptions issued digitally. Need 11-section architecture with Supabase, USSD fallback for feature phones, Africa's Talking, and MTN MoMo integration.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a022-01",
+          "description": "SORF booking status enum all 9 states for consultations",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a022-02",
+          "description": "MTN Mobile Money GHS collections with HMAC-SHA-256 callback",
+          "check": "Section 4 or Section 7 contains MTN Mobile Money or MoMo and 'HMAC' or 'SHA-256' for callback verification"
+        },
+        {
+          "id": "a022-03",
+          "description": "USSD fallback for feature phones",
+          "check": "Section 4 or Section 6 or Section 7 contains 'USSD' session flow for booking or consultation"
+        },
+        {
+          "id": "a022-04",
+          "description": "Africa's Talking for SMS and USSD",
+          "check": "Section 4 or Section 7 contains \"Africa's Talking\" or 'AfricasTalking' for SMS or USSD"
+        },
+        {
+          "id": "a022-05",
+          "description": "EXCLUDE USING gist prevents double-booking of doctors",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for doctor slot conflict prevention"
+        },
+        {
+          "id": "a022-06",
+          "description": "availability_windows for doctor schedules",
+          "check": "Section 3 contains 'availability_windows' for doctor or provider scheduling"
+        },
+        {
+          "id": "a022-07",
+          "description": "Prescription table with digital prescription workflow",
+          "check": "Section 3 contains 'prescription' table or digital prescription issuance"
+        },
+        {
+          "id": "a022-08",
+          "description": "branch_kpis or clinic_kpis materialised view",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' or 'clinic_kpis' materialised view"
+        },
+        {
+          "id": "a022-09",
+          "description": "held_until for 15-minute video slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a022-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and MTN MoMo keys in env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and ('MTN_MNO_API_KEY' or 'MOMO' or 'MTN_CLIENT')"
+        },
+        {
+          "id": "a022-11",
+          "description": "Real GHS consultation pricing in Section 9",
+          "check": "Section 9 contains specific GHS amounts (GH₵ or GHS) for consultation fees"
+        },
+        {
+          "id": "a022-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 20 cases pass. Target: 20 cases, 207 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 22 cases pass. Target: 22 cases, 231 assertions."
   }
 }

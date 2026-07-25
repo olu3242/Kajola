@@ -18,7 +18,7 @@ references/sql-patterns.md      Reusable Postgres patterns: SORF booking tables,
                                 MoMo transactions, USSD sessions, SMS logs, idempotency
 references/output-template.md   Formatting guide for all 11 sections + SORF enum/domain tables + market variants + currency table
 references/api-patterns.md      Edge Function patterns (HMAC, M-Pesa STK/B2C, Africa's Talking SMS+USSD, offline queue)
-evals/evals.json                Test cases — 20 scenarios, 207 assertions
+evals/evals.json                Test cases — 22 scenarios, 231 assertions
 supabase/migrations/20260725000002_sorf_reference_schema.sql
                                 Canonical SORF baseline migration — reference schema for generated platforms
 supabase/functions/book-slot/index.ts
@@ -31,7 +31,7 @@ supabase/functions/confirm-payment/index.ts
                                 reminder automation_jobs scheduling, charge.failed → cancel + notify_waitlist
 scripts/check-example.sh        SORF compliance validator for individual example .md files (50 checks)
                                 Usage: bash scripts/check-example.sh examples/glamplus-beauty-kenya.md
-scripts/validate-skill.sh       Full skill structure validator (104 checks)
+scripts/validate-skill.sh       Full skill structure validator (107 checks)
 examples/                       Full generated outputs (reference / demo)
   kajola-artisan-platform.md    Nigeria — Paystack + Termii
   toolhire-pro-nigeria.md       Nigeria — Paystack + equipment rental
@@ -43,6 +43,7 @@ examples/                       Full generated outputs (reference / demo)
   fitbook-gym-nigeria.md        Nigeria — Paystack Recurring + class capacity model + QR check-in + loyalty
   homepro-nigeria.md            Nigeria — GPS dispatch + before/after photo evidence + background checks
   sparkwash-nigeria-ghana.md    Nigeria + Ghana — Paystack + MTN MoMo + Recurring memberships + walk-in queue
+  cutculture-barbershop-nigeria.md  Nigeria — Paystack + Termii + 5-stamp loyalty + franchise royalty
 CONTRIBUTING.md                 Guide for community contributors
 ```
 
@@ -81,7 +82,7 @@ Evals are not automated yet. To manually evaluate the skill:
 2. Run each prompt from `evals/evals.json` → `cases[*].prompt`
 3. Check the output against the assertions in `cases[*].assertions`
 4. A case passes if ≥ 85% of its assertions pass
-5. The skill passes overall if all 20 cases pass
+5. The skill passes overall if all 22 cases pass
 
 Use `bash scripts/run-evals.sh` to print all prompts and assertions in a readable format.
 

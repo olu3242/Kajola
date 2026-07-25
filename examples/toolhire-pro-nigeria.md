@@ -1903,9 +1903,9 @@ jobs:
 
 ### 9.2 Transaction Fee Detail
 
-Every completed rental of ₦X (excluding deposit):
-- Platform fee (10%): ₦X × 0.10
-- Paystack processing (~1.5%): ₦X × 0.015
+Every completed rental (illustrative average: ₦35,000 excluding deposit):
+- Platform fee (10%): ₦3,500
+- Paystack processing (~1.5%): ₦525
 - Net platform margin: ~8.5% of rental value
 
 Example — 7-day generator rental at ₦5,000/day = ₦35,000:
@@ -2034,3 +2034,69 @@ ToolHire Pro does not retain deposit funds. Deposits flow Renter → Paystack ho
 - **Multi-tenancy**: Single-tenant MVP. Schema is multi-tenant-ready (`tenant_id` on all tables, RLS) for future SaaS expansion.
 - **Timezone**: Africa/Lagos (WAT, UTC+1) for all cron schedules and date display.
 - **Data residency**: Supabase on AWS `af-south-1` (Cape Town) — closest available region to Nigeria.
+
+---
+
+## SORF Framework Baseline
+
+_This section documents the SORF (Service Operations Reliability Framework) invariants that every Kajola-generated platform implements. Added as a canonical reference after the SORF standard was formalised._
+
+### Booking State Machine
+
+```sql
+-- All 9 SORF booking states
+CREATE TYPE booking_status AS ENUM (
+  'pending', 'confirmed', 'held', 'checked_in', 'in_progress',
+  'completed', 'cancelled', 'no_show', 'disputed'
+);
+
+-- bookings / rental_bookings includes:
+--   held_until timestamptz — optimistic 15-min hold
+--   EXCLUDE USING gist (...) WHERE status NOT IN ('cancelled','no_show')
+```
+
+### Required SORF Tables
+
+```sql
+-- Staff/asset scheduling
+CREATE TABLE availability_windows (id uuid PRIMARY KEY, staff_id uuid, day_of_week int, start_time time, end_time time);
+CREATE TABLE availability_overrides (id uuid PRIMARY KEY, staff_id uuid, override_date date, is_available boolean);
+
+-- Waitlist for constrained equipment availability
+CREATE TABLE waitlist_entries (id uuid PRIMARY KEY, customer_id uuid, equipment_id uuid, notified_at timestamptz);
+-- notify_waitlist trigger fires on status IN ('cancelled','no_show')
+
+-- Business policies
+-- businesses.deposit_policy  jsonb  -- e.g. {"require_deposit":true,"deposit_percent":20}
+-- businesses.no_show_policy  jsonb  -- e.g. {"warn_on_first":true,"require_prepayment_after":1}
+
+-- Loyalty for frequent renters
+CREATE TABLE loyalty_accounts (id uuid PRIMARY KEY, customer_id uuid, points_balance int DEFAULT 0);
+CREATE TABLE loyalty_transactions (id uuid PRIMARY KEY, account_id uuid, points_delta int, idempotency_key text UNIQUE NOT NULL);
+
+-- Async job queue
+CREATE TABLE automation_jobs (id uuid PRIMARY KEY, job_type text, payload jsonb, idempotency_key text UNIQUE NOT NULL, status text DEFAULT 'pending', run_at timestamptz);
+
+-- Branch / depot KPIs
+CREATE MATERIALIZED VIEW branch_kpis AS
+  SELECT branch_id, COUNT(*) AS active_rentals, SUM(total_amount) AS revenue_this_month
+  FROM rental_bookings WHERE status NOT IN ('cancelled','no_show') GROUP BY branch_id WITH DATA;
+SELECT cron.schedule('refresh_branch_kpis','*/15 * * * *','REFRESH MATERIALIZED VIEW CONCURRENTLY branch_kpis');
+```
+
+### Deployment — Canonical Env Vars
+
+| Variable | Source |
+|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard |
+| `PAYSTACK_SECRET_KEY` | Paystack dashboard |
+| `TERMII_API_KEY` | Termii dashboard |
+
+### Paystack Webhook (HMAC-SHA-512)
+
+```typescript
+// verify x-paystack-signature before processing charge.success / charge.failed
+const sig = req.headers.get('x-paystack-signature');
+const body = await req.text();
+// HMAC-SHA-512 verification — see references/api-patterns.md for full implementation
+```

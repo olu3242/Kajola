@@ -722,3 +722,67 @@ const staleJobs = await supabase
 8. **Data residency**: Supabase project hosted in `eu-west-1` (Frankfurt) pending Ghana DPA and ARTCI guidance on local data residency requirements. Phase 2 evaluates migration to a West Africa region.
 9. **Bilingual copy ownership**: All i18n strings owned by product team; Claude generates keys and en-GH defaults; fr-CI translations reviewed by a native French speaker before launch.
 10. **Offline flush conflict policy**: First scan wins. If a courier submits a `collected` event offline and a second courier's scan arrives first (online), the offline flush is rejected with 409 and flagged for manager review.
+
+---
+
+## SORF Framework Baseline
+
+_This section documents the SORF (Service Operations Reliability Framework) invariants that every Kajola-generated platform implements. Added as a canonical reference after the SORF standard was formalised._
+
+### Booking State Machine
+
+```sql
+-- All 9 SORF booking states (deliveries use a subset; full enum for framework compliance)
+CREATE TYPE booking_status AS ENUM (
+  'pending', 'confirmed', 'held', 'checked_in', 'in_progress',
+  'completed', 'cancelled', 'no_show', 'disputed'
+);
+-- parcels/bookings: held_until timestamptz — optimistic hold
+-- EXCLUDE USING gist on (courier_id, tstzrange(pickup_time, delivery_time, '[)')) WHERE status NOT IN ('cancelled','no_show')
+```
+
+### Required SORF Tables
+
+```sql
+-- Courier scheduling (recurring weekly availability)
+CREATE TABLE availability_windows (id uuid PRIMARY KEY, staff_id uuid, day_of_week int, start_time time, end_time time);
+CREATE TABLE availability_overrides (id uuid PRIMARY KEY, staff_id uuid, override_date date, is_available boolean);
+
+-- Waitlist for high-demand courier slots
+CREATE TABLE waitlist_entries (id uuid PRIMARY KEY, customer_id uuid, zone_id uuid, notified_at timestamptz);
+-- notify_waitlist trigger: fires on parcel status IN ('cancelled','no_show')
+
+-- Operator / hub policies
+-- businesses.deposit_policy  jsonb DEFAULT '{"require_deposit":false}'
+-- businesses.no_show_policy  jsonb DEFAULT '{"warn_on_first":true}'
+
+-- Loyalty for frequent senders
+CREATE TABLE loyalty_accounts (id uuid PRIMARY KEY, customer_id uuid, points_balance int DEFAULT 0);
+CREATE TABLE loyalty_transactions (id uuid PRIMARY KEY, account_id uuid, points_delta int, idempotency_key text UNIQUE NOT NULL);
+
+-- Async job queue (idempotent)
+CREATE TABLE automation_jobs (id uuid PRIMARY KEY, job_type text, payload jsonb, idempotency_key text UNIQUE NOT NULL, status text DEFAULT 'pending', run_at timestamptz);
+
+-- Hub / branch KPIs
+CREATE MATERIALIZED VIEW branch_kpis AS
+  SELECT hub_id AS branch_id, COUNT(*) AS deliveries_today
+  FROM parcels WHERE created_at >= CURRENT_DATE GROUP BY hub_id WITH DATA;
+SELECT cron.schedule('refresh_branch_kpis','*/15 * * * *','REFRESH MATERIALIZED VIEW CONCURRENTLY branch_kpis');
+```
+
+### Deployment — Canonical Env Vars
+
+| Variable | Source |
+|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard |
+| `MTN_MNO_API_KEY` | MTN developer portal (Ghana) |
+| `ORANGE_CLIENT_SECRET` | Orange Money API (Côte d'Ivoire) |
+| `TERMII_API_KEY` | Termii dashboard |
+
+### Payment Webhook Handlers
+
+```typescript
+// MTN MoMo callback (Ghana) — HMAC-SHA-256 on X-Callback-Signature
+// Orange Money callback (CI) — OAuth signature on X-Orange-Signature
+// Both webhooks update parcel status and dispatch automation_jobs
+```

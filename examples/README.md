@@ -174,6 +174,25 @@ What's inside:
 
 ---
 
+### [`cutculture-barbershop-nigeria.md`](./cutculture-barbershop-nigeria.md)
+
+**Markets**: Nigeria (NGN) · **Payments**: Paystack (card + USSD) + Termii SMS · **Auth**: Phone OTP (Termii) · **Vertical**: Barbershop franchise chain
+
+What's inside:
+- 5-stamp loyalty card: every 5th haircut free; `awardStamp()` Edge Function is fully idempotent via `idempotency_key`
+- Franchise royalty model: 5% of GMV per branch; `franchise_royalty_accounts` table tracks per-branch balances; monthly settlement automation
+- Slot conflict prevention: `EXCLUDE USING gist` on `(barber_id, branch_id, tstzrange(starts_at, ends_at, '[)'))` — prevents double-booking at DB level
+- No-show policy: 2-strike system stored as `no_show_policy` jsonb on `businesses`; 3rd offence triggers `require_prepayment` flag on customer profile
+- Portfolio photos: `job_photos` table with `photo_type IN ('before','after','portfolio')` for stylist galleries stored in private Supabase Storage bucket
+- `notify_waitlist()` trigger fires on `status IN ('cancelled','no_show')` — promotes next waitlisted customer and dispatches Termii SMS
+- `pg_cron` `mark_noshows` job: fires 30 min after appointment end, transitions `in_progress → no_show` for absent customers
+- `branch_kpis` materialised view refreshed every 15 min: daily revenue, appointment count, no-show rate, top barber
+- 18 tables covering all SORF invariants: `availability_windows`, `availability_overrides`, `waitlist_entries`, `loyalty_accounts`, `loyalty_transactions`, `automation_jobs`
+- Monetization: ₦35,000/month/branch SaaS + 5% royalty + ₦150,000 onboarding fee; ₦4,850,000/month MRR at 20 branches
+- Quarterly roadmap: Q3 2026 Lagos pilot → Q4 5-branch franchise → Q1 2027 AI style matching → Q2 West Africa expansion
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:

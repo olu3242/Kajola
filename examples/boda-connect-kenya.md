@@ -756,3 +756,67 @@ WHERE tenant_id = $1;
 8. **Kenya Data Protection Act compliance**: Personal data (phone, ID, location) is stored within Supabase's Africa (cape-town) region or EU region pending CA confirmation; KYC documents deleted within 30 days of offboarding.
 9. **Bilingual copy**: All user-facing strings managed via i18n JSON files (`sw-KE.json`, `en-KE.json`); RTL not required for Swahili.
 10. **Rating MVP**: Post-trip ratings are optional for passengers; mandatory for riders above 100 trips. Dispute resolution is manual (Sacco manager) in Phase 1.
+
+---
+
+## SORF Framework Baseline
+
+_This section documents the SORF (Service Operations Reliability Framework) invariants that every Kajola-generated platform implements. Added as a canonical reference after the SORF standard was formalised._
+
+### Booking State Machine
+
+```sql
+-- All 9 SORF booking states (trips use a subset; full enum for framework compliance)
+CREATE TYPE booking_status AS ENUM (
+  'pending', 'confirmed', 'held', 'checked_in', 'in_progress',
+  'completed', 'cancelled', 'no_show', 'disputed'
+);
+-- trips.held_until timestamptz — optimistic hold released by pg_cron
+-- EXCLUDE USING gist on (rider_id, tstzrange(start_time, end_time, '[)')) WHERE status NOT IN ('cancelled','no_show')
+```
+
+### Required SORF Tables
+
+```sql
+-- Rider scheduling (recurring weekly shifts)
+CREATE TABLE availability_windows (id uuid PRIMARY KEY, staff_id uuid, day_of_week int, start_time time, end_time time);
+CREATE TABLE availability_overrides (id uuid PRIMARY KEY, staff_id uuid, override_date date, is_available boolean);
+
+-- Waitlist for peak-demand zones
+CREATE TABLE waitlist_entries (id uuid PRIMARY KEY, customer_id uuid, zone_id uuid, notified_at timestamptz);
+-- notify_waitlist trigger: INSERT INTO automation_jobs WHERE NEW.status IN ('cancelled','no_show')
+
+-- Sacco / operator policies
+-- businesses.deposit_policy  jsonb DEFAULT '{"require_deposit":false}'
+-- businesses.no_show_policy  jsonb DEFAULT '{"warn_on_first":true}'
+
+-- Loyalty for frequent riders
+CREATE TABLE loyalty_accounts (id uuid PRIMARY KEY, customer_id uuid, points_balance int DEFAULT 0);
+CREATE TABLE loyalty_transactions (id uuid PRIMARY KEY, account_id uuid, points_delta int, idempotency_key text UNIQUE NOT NULL);
+
+-- Async job queue
+CREATE TABLE automation_jobs (id uuid PRIMARY KEY, job_type text, payload jsonb, idempotency_key text UNIQUE NOT NULL, status text DEFAULT 'pending', run_at timestamptz);
+
+-- Branch / Sacco KPIs
+CREATE MATERIALIZED VIEW branch_kpis AS
+  SELECT sacco_id AS branch_id, COUNT(*) AS trips_today, SUM(fare_kes) AS revenue_today
+  FROM trips WHERE created_at >= CURRENT_DATE GROUP BY sacco_id WITH DATA;
+SELECT cron.schedule('refresh_branch_kpis','*/15 * * * *','REFRESH MATERIALIZED VIEW CONCURRENTLY branch_kpis');
+```
+
+### Deployment — Canonical Env Vars
+
+| Variable | Source |
+|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard |
+| `DARAJA_CONSUMER_KEY` | Safaricom Daraja portal |
+| `AT_API_KEY` | Africa's Talking dashboard |
+
+### Daraja M-Pesa Callback Webhook (HMAC Verification)
+
+```typescript
+// webhook handler for Daraja C2B / STK Push confirmation
+// Verify x-mpesa-signature before updating trip status
+const sig = req.headers.get('x-mpesa-signature');
+// HMAC-SHA-256 check against DARAJA_PASSKEY — see references/api-patterns.md
+```
