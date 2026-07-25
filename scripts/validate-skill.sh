@@ -186,12 +186,12 @@ else
   check "evals.json is valid JSON" "fail" "JSON parse error"
 fi
 
-# At least 8 cases
+# At least 10 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 8 ]]; then
-  check "evals.json has at least 8 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 10 ]]; then
+  check "evals.json has at least 10 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 8 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 10 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions

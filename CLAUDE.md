@@ -18,7 +18,7 @@ references/sql-patterns.md      Reusable Postgres patterns: SORF booking tables,
                                 MoMo transactions, USSD sessions, SMS logs, idempotency
 references/output-template.md   Formatting guide for all 11 sections + SORF enum/domain tables + market variants + currency table
 references/api-patterns.md      Edge Function patterns (HMAC, M-Pesa STK/B2C, Africa's Talking SMS+USSD, offline queue)
-evals/evals.json                Test cases — 10 scenarios, 89 assertions
+evals/evals.json                Test cases — 12 scenarios, 113 assertions
 examples/                       Full generated outputs (reference / demo)
   kajola-artisan-platform.md    Nigeria — Paystack + Termii
   toolhire-pro-nigeria.md       Nigeria — Paystack + equipment rental
@@ -63,7 +63,7 @@ Evals are not automated yet. To manually evaluate the skill:
 2. Run each prompt from `evals/evals.json` → `cases[*].prompt`
 3. Check the output against the assertions in `cases[*].assertions`
 4. A case passes if ≥ 85% of its assertions pass
-5. The skill passes overall if all 10 cases pass
+5. The skill passes overall if all 12 cases pass
 
 Use `bash scripts/run-evals.sh` to print all prompts and assertions in a readable format.
 

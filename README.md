@@ -128,7 +128,7 @@ kajola/
 │   ├── output-template.md          # Structured output template for all 11 sections
 │   └── api-patterns.md             # Edge Function patterns: HMAC, M-Pesa, AT SMS, offline queue
 ├── evals/
-│   └── evals.json                  # 10 test cases, 89 assertions
+│   └── evals.json                  # 12 test cases, 113 assertions
 └── examples/
     ├── README.md                   # Examples index
     ├── kajola-artisan-platform.md  # Artisan booking marketplace — Nigeria (Paystack + Termii)
