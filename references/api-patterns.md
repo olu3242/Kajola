@@ -548,3 +548,290 @@ export async function flushQueue(authToken: string) {
 // In your app's network listener:
 // NetInfo.addEventListener(state => { if (state.isConnected) flushQueue(token); });
 ```
+
+---
+
+## MTN Mobile Money (MoMo) — GHS Payment
+
+Initiate a GHS payment via MTN MoMo Collections API and handle the callback.
+
+```typescript
+// POST https://sandbox.momodeveloper.mtn.com/collection/v1_0/requesttopay
+async function initiateMomoPayment(params: {
+  amount: string;          // e.g. "50.00"
+  currency: string;        // "GHS"
+  externalId: string;      // your order/booking reference
+  payerMsisdn: string;     // customer phone, e.g. "0244123456"
+  payerMessage: string;
+  payeeNote: string;
+}) {
+  const referenceId = crypto.randomUUID();
+
+  const res = await fetch(`${Deno.env.get("MOMO_BASE_URL")}/collection/v1_0/requesttopay`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${await getMomoToken()}`,
+      "X-Reference-Id": referenceId,
+      "X-Target-Environment": Deno.env.get("MOMO_ENVIRONMENT") ?? "sandbox",
+      "Ocp-Apim-Subscription-Key": Deno.env.get("MOMO_SUBSCRIPTION_KEY")!,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      amount: params.amount,
+      currency: params.currency,
+      externalId: params.externalId,
+      payer: { partyIdType: "MSISDN", partyId: params.payerMsisdn },
+      payerMessage: params.payerMessage,
+      payeeNote: params.payeeNote,
+    }),
+  });
+
+  if (res.status !== 202) throw new Error(`MoMo initiate failed: ${res.status}`);
+  return referenceId; // store this to check status / correlate callback
+}
+
+// Obtain a short-lived API token (expires in 3600s — cache in KV or memory)
+async function getMomoToken(): Promise<string> {
+  const credentials = btoa(
+    `${Deno.env.get("MOMO_API_USER")}:${Deno.env.get("MOMO_API_KEY")}`
+  );
+  const res = await fetch(`${Deno.env.get("MOMO_BASE_URL")}/collection/token/`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${credentials}`,
+      "Ocp-Apim-Subscription-Key": Deno.env.get("MOMO_SUBSCRIPTION_KEY")!,
+    },
+  });
+  const data = await res.json();
+  return data.access_token;
+}
+
+// MoMo callback verification — validate X-Callback-Signature (HMAC-SHA-256)
+async function verifyMomoCallback(req: Request): Promise<boolean> {
+  const signature = req.headers.get("X-Callback-Signature");
+  if (!signature) return false;
+  const rawBody = await req.text();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(Deno.env.get("MOMO_CALLBACK_SECRET")!),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
+  const expected = Array.from(new Uint8Array(mac)).map(b => b.toString(16).padStart(2, "0")).join("");
+  return signature === expected;
+}
+
+// Callback payload shape (status: SUCCESSFUL | FAILED | PENDING)
+interface MomoCallbackPayload {
+  financialTransactionId: string;
+  externalId: string;            // matches your booking/order reference
+  amount: string;
+  currency: string;
+  payer: { partyIdType: "MSISDN"; partyId: string };
+  payerMessage: string;
+  payeeNote: string;
+  status: "SUCCESSFUL" | "FAILED" | "PENDING";
+  reason?: { code: string; message: string };
+}
+```
+
+Required env vars: `MOMO_BASE_URL`, `MOMO_ENVIRONMENT`, `MOMO_SUBSCRIPTION_KEY`, `MOMO_API_USER`, `MOMO_API_KEY`, `MOMO_CALLBACK_SECRET`
+
+---
+
+## Termii OTP — Send & Verify (West Africa Primary Auth)
+
+Send and verify phone-based OTP via Termii API. Phone OTP is the primary auth method — no email dependency.
+
+```typescript
+const TERMII_BASE = "https://api.ng.termii.com/api";
+const OTP_TTL_MINUTES = 10;
+const OTP_DIGITS = 6;
+
+// Send OTP via Termii token endpoint
+async function sendTermiiOtp(params: {
+  phone: string;      // E.164, e.g. "+2348012345678"
+  tenantId: string;
+}): Promise<{ pinId: string }> {
+  const res = await fetch(`${TERMII_BASE}/sms/otp/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: Deno.env.get("TERMII_API_KEY"),
+      message_type: "NUMERIC",
+      to: params.phone,
+      from: Deno.env.get("TERMII_SENDER_ID") ?? "N-Alert",
+      channel: "dnd",        // "dnd" for Nigeria DND numbers; fallback to "generic"
+      pin_attempts: 3,
+      pin_time_to_live: OTP_TTL_MINUTES,
+      pin_length: OTP_DIGITS,
+      pin_placeholder: "< 1234 >",
+      message_text: "Your verification code is < 1234 >. Valid for 10 minutes.",
+      pin_type: "NUMERIC",
+    }),
+  });
+
+  const data = await res.json();
+  if (!data.pinId) throw new Error(`Termii OTP send failed: ${JSON.stringify(data)}`);
+
+  // Persist pinId for verification (store in phone_otps table)
+  await supabase.from("phone_otps").insert({
+    phone: params.phone,
+    tenant_id: params.tenantId,
+    pin_id: data.pinId,       // Termii reference
+    expires_at: new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000).toISOString(),
+  });
+
+  return { pinId: data.pinId };
+}
+
+// Verify OTP via Termii — also checks local phone_otps table for expiry/max attempts
+async function verifyTermiiOtp(params: {
+  pinId: string;
+  otp: string;
+  tenantId: string;
+}): Promise<{ verified: boolean }> {
+  // Local guard — check not expired and not already used
+  const { data: record } = await supabase
+    .from("phone_otps")
+    .select("expires_at, verified_at, attempts")
+    .eq("pin_id", params.pinId)
+    .eq("tenant_id", params.tenantId)
+    .single();
+
+  if (!record) return { verified: false };
+  if (record.verified_at) return { verified: false }; // already used
+  if (new Date(record.expires_at) < new Date()) return { verified: false }; // expired
+
+  const res = await fetch(`${TERMII_BASE}/sms/otp/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: Deno.env.get("TERMII_API_KEY"),
+      pin_id: params.pinId,
+      pin: params.otp,
+    }),
+  });
+
+  const data = await res.json();
+  const verified = data.verified === "True";
+
+  if (verified) {
+    await supabase.from("phone_otps").update({ verified_at: new Date().toISOString() })
+      .eq("pin_id", params.pinId);
+  } else {
+    await supabase.from("phone_otps")
+      .update({ attempts: (record.attempts ?? 0) + 1 })
+      .eq("pin_id", params.pinId);
+  }
+
+  return { verified };
+}
+```
+
+Required env vars: `TERMII_API_KEY`, `TERMII_SENDER_ID`
+
+---
+
+## Paystack Recurring Subscriptions
+
+Create a subscription plan, subscribe a customer, handle the `subscription.create` webhook, and cancel.
+
+```typescript
+const PAYSTACK_BASE = "https://api.paystack.co";
+const paystackHeaders = () => ({
+  "Authorization": `Bearer ${Deno.env.get("PAYSTACK_SECRET_KEY")}`,
+  "Content-Type": "application/json",
+});
+
+// 1. Create a plan (once at onboarding — store plan_code in DB)
+async function createPaystackPlan(params: {
+  name: string;             // e.g. "GlamPlus Pro Monthly"
+  amount: number;           // in kobo, e.g. 800000 for ₦8,000
+  interval: "monthly" | "quarterly" | "annually" | "weekly" | "daily";
+}): Promise<{ planCode: string }> {
+  const res = await fetch(`${PAYSTACK_BASE}/plan`, {
+    method: "POST",
+    headers: paystackHeaders(),
+    body: JSON.stringify({ name: params.name, amount: params.amount, interval: params.interval }),
+  });
+  const data = await res.json();
+  if (!data.status) throw new Error(`Create plan failed: ${data.message}`);
+  return { planCode: data.data.plan_code };
+}
+
+// 2. Subscribe a customer to a plan (after initial charge.success sets authorization_code)
+async function subscribeCustomer(params: {
+  customerId: string;           // Paystack customer_code
+  planCode: string;             // from createPaystackPlan
+  authorizationCode: string;    // from initial charge's authorization.authorization_code
+  startDate?: string;           // ISO — defaults to next billing cycle
+}): Promise<{ subscriptionCode: string; emailToken: string }> {
+  const res = await fetch(`${PAYSTACK_BASE}/subscription`, {
+    method: "POST",
+    headers: paystackHeaders(),
+    body: JSON.stringify({
+      customer: params.customerId,
+      plan: params.planCode,
+      authorization: params.authorizationCode,
+      start_date: params.startDate,
+    }),
+  });
+  const data = await res.json();
+  if (!data.status) throw new Error(`Subscribe failed: ${data.message}`);
+  return {
+    subscriptionCode: data.data.subscription_code,
+    emailToken: data.data.email_token, // needed to manage subscription via email link
+  };
+}
+
+// 3. Handle subscription.create and invoice.payment_failed webhooks
+// (Verify HMAC first using verifyPaystack pattern above, then:)
+async function handleSubscriptionWebhook(event: { event: string; data: Record<string, unknown> }) {
+  if (event.event === "subscription.create") {
+    const sub = event.data;
+    // Activate membership in your DB
+    await supabase.from("memberships")
+      .update({
+        status: "active",
+        paystack_sub_code: sub.subscription_code,
+        next_payment_date: sub.next_payment_date,
+      })
+      .eq("paystack_customer_code", sub.customer.customer_code);
+  }
+
+  if (event.event === "invoice.payment_failed") {
+    const sub = event.data;
+    // Grace period: mark payment_failed, notify user, do NOT immediately deactivate
+    await supabase.from("memberships")
+      .update({ status: "payment_failed", payment_failed_at: new Date().toISOString() })
+      .eq("paystack_sub_code", sub.subscription_code);
+    // Schedule a reminder automation_job for 24h and 48h grace reminders
+  }
+
+  if (event.event === "subscription.disable") {
+    const sub = event.data;
+    await supabase.from("memberships")
+      .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
+      .eq("paystack_sub_code", sub.subscription_code);
+  }
+}
+
+// 4. Cancel a subscription (customer-initiated)
+async function cancelPaystackSubscription(params: {
+  subscriptionCode: string;
+  emailToken: string;           // must match the email_token stored at subscribe time
+}): Promise<void> {
+  const res = await fetch(`${PAYSTACK_BASE}/subscription/disable`, {
+    method: "POST",
+    headers: paystackHeaders(),
+    body: JSON.stringify({ code: params.subscriptionCode, token: params.emailToken }),
+  });
+  const data = await res.json();
+  if (!data.status) throw new Error(`Cancel subscription failed: ${data.message}`);
+}
+```
+
+Required env vars: `PAYSTACK_SECRET_KEY`

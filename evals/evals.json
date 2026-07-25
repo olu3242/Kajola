@@ -1067,11 +1067,147 @@
           "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
         }
       ]
+    },
+    {
+      "id": "eval-019",
+      "name": "Construction equipment rental marketplace (Nigeria)",
+      "prompt": "Design a peer-to-peer construction equipment rental marketplace for Nigeria called RigLink. Contractors list heavy equipment (generators, concrete mixers, scaffolding, excavators). Renters book by date range — rental_period stored as a daterange with EXCLUDE USING gist to prevent overlapping rentals on the same piece of equipment. 20% security deposit via Paystack card to hold the booking; balance collected on equipment pickup. Equipment condition logged (photos + notes) before and after each rental. Waitlist when equipment is already booked. Rental owner receives payout on completion. Loyalty for frequent renters: 10 completed rentals earns a featured badge and 5% discount. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a019-01",
+          "description": "daterange EXCLUDE USING gist prevents overlapping rentals on same equipment",
+          "check": "Section 3 contains 'EXCLUDE USING gist' and 'daterange' or 'rental_period' for equipment conflict prevention"
+        },
+        {
+          "id": "a019-02",
+          "description": "rental_period stored as daterange column",
+          "check": "Section 3 contains 'daterange' or 'rental_period' for date-based rental bookings"
+        },
+        {
+          "id": "a019-03",
+          "description": "Condition records (before/after inspection) with photo evidence",
+          "check": "Section 3 or Section 4 contains 'condition' or 'condition_records' or 'inspection' for pre/post rental state"
+        },
+        {
+          "id": "a019-04",
+          "description": "Security deposit or 20% deposit handled at booking time",
+          "check": "Section 3 or Section 4 contains 'deposit' or 'deposit_policy' or 'security_deposit' for 20% hold"
+        },
+        {
+          "id": "a019-05",
+          "description": "Paystack payment integration for NGN",
+          "check": "output contains 'Paystack' as the payment provider for Nigeria"
+        },
+        {
+          "id": "a019-06",
+          "description": "HMAC webhook verification for Paystack",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a019-07",
+          "description": "waitlist_entries for equipment that is already rented",
+          "check": "Section 3 contains 'waitlist_entries' or 'waitlist' for equipment availability"
+        },
+        {
+          "id": "a019-08",
+          "description": "held_until for optimistic rental hold",
+          "check": "Section 3 or Section 4 contains 'held_until' or 'slot hold'"
+        },
+        {
+          "id": "a019-09",
+          "description": "loyalty_accounts for frequent renter programme",
+          "check": "Section 3 contains 'loyalty_accounts' or 'loyalty' for renter incentives"
+        },
+        {
+          "id": "a019-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY in Section 8 env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY'"
+        },
+        {
+          "id": "a019-11",
+          "description": "Real NGN pricing and platform fee in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) for rental fees or platform commission"
+        },
+        {
+          "id": "a019-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-020",
+      "name": "Multi-location barbershop franchise (Nigeria)",
+      "prompt": "Design a multi-location barbershop and men's grooming franchise platform for Nigeria called CutCulture. Barbers create profiles under their branch, with portfolio photos in Supabase Storage. Customers book a specific barber for haircut, beard trim, or full grooming packages. Multi-branch franchise: the franchise owner views cross-branch KPIs via a materialised view refreshed every 15 minutes. Payments via Paystack card and USSD. No-show policy: after 2 no-shows, prepayment is required. Loyalty: complete 5 bookings to earn a free trim (tracked via loyalty_accounts and loyalty_transactions). SMS reminders via Termii. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a020-01",
+          "description": "availability_windows for barber weekly schedules",
+          "check": "Section 3 contains 'availability_windows' with day_of_week for barber scheduling"
+        },
+        {
+          "id": "a020-02",
+          "description": "EXCLUDE USING gist prevents barber double-booking",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for barber appointment conflict prevention"
+        },
+        {
+          "id": "a020-03",
+          "description": "branch_kpis materialised view for franchise owner dashboard",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view refreshed by pg_cron"
+        },
+        {
+          "id": "a020-04",
+          "description": "loyalty_accounts with 5-booking milestone for free trim",
+          "check": "Section 3 contains 'loyalty_accounts' and 'loyalty_transactions' for 5-booking milestone"
+        },
+        {
+          "id": "a020-05",
+          "description": "no_show_policy requires prepayment after 2 no-shows",
+          "check": "Section 3 or Section 1 contains 'no_show_policy' or 'require_prepayment' after 2 no-shows"
+        },
+        {
+          "id": "a020-06",
+          "description": "Paystack HMAC webhook verification",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a020-07",
+          "description": "held_until for 15-minute optimistic slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a020-08",
+          "description": "idempotency_key on automation_jobs for duplicate-safe reminders",
+          "check": "Section 3 or Section 7 contains 'idempotency_key' or 'idempotent' on automation jobs"
+        },
+        {
+          "id": "a020-09",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and TERMII_API_KEY in Section 8",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and 'TERMII_API_KEY'"
+        },
+        {
+          "id": "a020-10",
+          "description": "Real NGN service pricing in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) for haircut or grooming prices"
+        },
+        {
+          "id": "a020-11",
+          "description": "waitlist_entries with notify_waitlist trigger for cancellations",
+          "check": "Section 3 contains 'waitlist_entries' and 'notify_waitlist'"
+        },
+        {
+          "id": "a020-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 18 cases pass. Target: 18 cases, 182 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 20 cases pass. Target: 20 cases, 207 assertions."
   }
 }

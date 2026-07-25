@@ -137,6 +137,43 @@ What's inside:
 
 ---
 
+### `homepro-nigeria.md`
+**Prompt**: "Design a multi-tenant on-demand home services platform for Nigeria called HomePro. Customers book verified providers for home cleaning, plumbing, electrical repairs, AC servicing, and painting. Providers complete a background check before listing. Customers pay a 30% deposit via Paystack to hold the slot. Provider GPS location is shared in real-time from dispatch to arrival. Before and after photo evidence uploaded to Supabase Storage. Multi-city: Lagos, Abuja, Port Harcourt."
+
+**Market**: Nigeria · **Currency**: NGN · **Payments**: Paystack · **Auth**: Phone OTP (Termii) · **Vertical**: Home services dispatch
+
+What's inside:
+- Background check gate: `provider_profiles.background_check_status` enum — providers cannot be booked unless 'passed'
+- GPS tracking: `gps_pings` append-only table with future-timestamp guard; Supabase Realtime channel per booking
+- Job evidence: `job_photos` table with `photo_type` enum (before/after/damage), private `job-evidence` Storage bucket
+- Service quotes: `service_quotes` table — provider submits estimate before customer confirms
+- 22-table schema covering all SORF invariants: `bookings` (EXCLUDE USING gist), `availability_windows` + `availability_overrides`, `waitlist_entries` (with `notify_waitlist` trigger), `loyalty_accounts` + `loyalty_transactions`, `branch_kpis` matview
+- `deposit_policy` + `no_show_policy` jsonb on `businesses` (30% deposit default; second no-show → prepayment required)
+- Cash payment tracking alongside Paystack card + USSD (mixed payment methods by provider)
+- 10 API endpoints including send-otp, book-slot (SORF held + 30% deposit), paystack-webhook (HMAC), GPS-ping, upload-job-photo, complete-booking
+- Monetization in NGN: 15% platform fee, Pro Provider ₦8,000/month, Property Manager ₦25,000/month; ₦5.9M MRR at 500 jobs/day
+- Quarterly roadmap: Q3 2026 Lagos launch → Q4 quotes + Abuja/PH → Q1 2027 AI dispatch → Q2 franchising
+
+---
+
+### `sparkwash-nigeria-ghana.md`
+**Prompt**: "Design a multi-location car wash and auto-detailing chain for Nigeria and Ghana called SparkWash. Customers book express or premium detailing slots. Monthly membership passes via Paystack Recurring (Nigeria) and MTN MoMo (Ghana). Walk-in queue management runs alongside pre-booked appointments. Loyalty stamp card: 10 washes earn 1 free wash. Branch managers see a live queue dashboard."
+
+**Markets**: Nigeria (NGN) + Ghana (GHS) · **Payments**: Paystack (NGN) + MTN Mobile Money (GHS) · **Auth**: Phone OTP (Termii) · **Vertical**: Car wash chain
+
+What's inside:
+- Dual booking modes: pre-booked appointments (staff assignment + EXCLUDE USING gist) and walk-in queue (`walkin_queue` table with Supabase Realtime live position)
+- Multi-currency schema: `payment_transactions.currency` enum (NGN/GHS); branch-level `currency` field routes payments to Paystack or MTN MoMo
+- Paystack Recurring: `memberships.paystack_sub_code`, handles `subscription.create`, `invoice.payment_failed`, `subscription.disable` webhooks
+- MTN MoMo Collections API for GHS: `initiateMomoPayment` + HMAC-SHA-256 callback verification
+- 10-wash stamp card: `loyalty_accounts.stamp_count`; every 10th stamp auto-credits `free_washes_available` via `loyalty_transactions`
+- 20-table schema: all SORF invariants including `availability_windows`, `availability_overrides`, `waitlist_entries`, `notify_waitlist` trigger, `branch_kpis` matview refreshed every 15 min
+- `walkin_queue` broadcasts to Supabase Realtime channel `walkin_queue:{branch_id}` for live queue position display
+- Monetization in NGN + GHS: Express Wash ₦3,500 / GHS 35; Unlimited Wash ₦15,000/month; Premium Club ₦45,000/month; ₦87M MRR at 10 Nigeria branches
+- Quarterly roadmap: Q3 2026 launch → Q4 memberships + fleet → Q1 2027 dynamic pricing + Ghana recurring → Q2 Rwanda/Uganda
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:

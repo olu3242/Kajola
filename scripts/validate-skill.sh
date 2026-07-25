@@ -178,6 +178,16 @@ assert_contains "references/api-patterns.md" "Daraja\|M-Pesa\|mpesaStkPush" "M-P
 assert_contains "references/api-patterns.md" "Africa.*Talking\|sendAtSms"   "Africa's Talking pattern in api-patterns.md"
 assert_contains "references/api-patterns.md" "USSD"                          "USSD handler pattern in api-patterns.md"
 assert_contains "references/api-patterns.md" "flushQueue\|offline.*queue\|expo-sqlite" "Offline queue pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "MTN\|MoMo\|momodeveloper"     "MTN MoMo pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "Termii\|sendTermiiOtp\|verifyTermiiOtp" "Termii OTP pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "Paystack.*Recurring\|createPaystackPlan\|subscribeCustomer\|paystack_sub_code" "Paystack Recurring pattern in api-patterns.md"
+
+echo ""
+echo "[ SORF — SQL patterns checks (extended) ]"
+assert_contains "references/sql-patterns.md" "gps_pings\|gps_ping"          "GPS pings pattern in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "job_photos\|photo_type"       "Job photos pattern in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "daterange.*EXCLUDE\|EXCLUDE.*daterange\|rental_period" "daterange EXCLUDE USING gist in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "class_sessions\|enroll_in_class\|FOR UPDATE" "Class session capacity pattern in sql-patterns.md"
 
 echo ""
 echo "[ Examples — coverage ]"
@@ -201,10 +211,10 @@ fi
 
 # At least 14 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 16 ]]; then
-  check "evals.json has at least 16 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 18 ]]; then
+  check "evals.json has at least 18 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 16 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 18 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -226,10 +236,10 @@ import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 170 ]]; then
-  check "evals.json has at least 170 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 200 ]]; then
+  check "evals.json has at least 200 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 170 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 200 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present

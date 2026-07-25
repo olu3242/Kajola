@@ -875,3 +875,313 @@ async function guardIdempotent(key: string, operation: string, tenantId: string)
   return { isNew: true }; // was processing — let it through (rare race)
 }
 ```
+
+---
+
+## GPS Pings — Append-Only Location Tracking
+
+Real-time position stream for dispatch, home services, and logistics verticals. Append-only — never updated or deleted. Supabase Realtime broadcast per booking.
+
+```sql
+-- Table: gps_pings
+-- Append-only: no UPDATE/DELETE allowed (enforced by RLS + trigger)
+CREATE TABLE gps_pings (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  booking_id    uuid NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  tenant_id     uuid NOT NULL REFERENCES businesses(id),
+  provider_id   uuid NOT NULL REFERENCES staff(id),
+  location      geography(POINT, 4326) NOT NULL,
+  recorded_at   timestamptz NOT NULL DEFAULT now(),
+  accuracy_m    float,               -- GPS accuracy in metres (optional)
+  speed_kmh     float,               -- optional
+  bearing_deg   float                -- 0–359, optional
+);
+
+-- Guard: reject pings with future timestamps (clock skew protection)
+CREATE OR REPLACE FUNCTION guard_gps_ping_timestamp()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.recorded_at > now() + interval '30 seconds' THEN
+    RAISE EXCEPTION 'gps_ping recorded_at cannot be in the future';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_guard_gps_ping_timestamp
+BEFORE INSERT ON gps_pings
+FOR EACH ROW EXECUTE FUNCTION guard_gps_ping_timestamp();
+
+-- Prevent updates and deletes (append-only enforcement)
+CREATE OR REPLACE FUNCTION deny_gps_ping_mutation()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'gps_pings is append-only';
+END;
+$$;
+
+CREATE TRIGGER trg_deny_gps_ping_update
+BEFORE UPDATE ON gps_pings FOR EACH ROW EXECUTE FUNCTION deny_gps_ping_mutation();
+
+CREATE TRIGGER trg_deny_gps_ping_delete
+BEFORE DELETE ON gps_pings FOR EACH ROW EXECUTE FUNCTION deny_gps_ping_mutation();
+
+-- RLS: provider inserts own pings; tenant reads own booking pings
+ALTER TABLE gps_pings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "provider_insert_own_pings" ON gps_pings FOR INSERT
+  WITH CHECK (provider_id = auth.uid() AND tenant_id = current_user_tenant_id());
+CREATE POLICY "tenant_read_pings" ON gps_pings FOR SELECT
+  USING (tenant_id = current_user_tenant_id());
+
+-- Spatial index for proximity queries
+CREATE INDEX idx_gps_pings_location ON gps_pings USING GIST (location);
+CREATE INDEX idx_gps_pings_booking_recorded ON gps_pings (booking_id, recorded_at DESC);
+
+-- Latest ping per booking (for map display)
+CREATE OR REPLACE VIEW latest_gps_pings AS
+SELECT DISTINCT ON (booking_id)
+  booking_id, provider_id, location, recorded_at, accuracy_m, speed_kmh
+FROM gps_pings
+ORDER BY booking_id, recorded_at DESC;
+```
+
+Supabase Realtime: publish a broadcast message on channel `booking:{booking_id}` after insert via an Edge Function or DB webhook. Clients subscribe to this channel for live map updates.
+
+---
+
+## Job Photos — Evidence Table
+
+Before/after/damage photo evidence for home services, equipment rental, and inspection verticals. Files stored in a private Supabase Storage bucket.
+
+```sql
+-- Enum for photo type
+CREATE TYPE photo_type AS ENUM ('before', 'after', 'damage', 'completion', 'id_verification');
+
+-- Table: job_photos
+CREATE TABLE job_photos (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  booking_id    uuid NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  tenant_id     uuid NOT NULL REFERENCES businesses(id),
+  uploaded_by   uuid NOT NULL REFERENCES users(id),
+  photo_type    photo_type NOT NULL,
+  storage_path  text NOT NULL,   -- path in private 'job-evidence' bucket, e.g. "{tenant_id}/{booking_id}/before-001.jpg"
+  caption       text,
+  taken_at      timestamptz NOT NULL DEFAULT now(),
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE job_photos ENABLE ROW LEVEL SECURITY;
+
+-- Only parties to the booking (provider + customer) and tenant admins may view
+CREATE POLICY "booking_parties_read_photos" ON job_photos FOR SELECT
+  USING (
+    tenant_id = current_user_tenant_id()
+    AND (
+      uploaded_by = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM bookings b
+        WHERE b.id = job_photos.booking_id
+          AND (b.customer_id = auth.uid() OR b.staff_id = auth.uid())
+      )
+    )
+  );
+
+-- Provider may insert own photos during active/completed bookings
+CREATE POLICY "provider_insert_job_photos" ON job_photos FOR INSERT
+  WITH CHECK (
+    uploaded_by = auth.uid()
+    AND tenant_id = current_user_tenant_id()
+    AND EXISTS (
+      SELECT 1 FROM bookings b
+      WHERE b.id = job_photos.booking_id
+        AND b.staff_id = auth.uid()
+        AND b.status IN ('checked_in', 'in_progress', 'completed')
+    )
+  );
+
+CREATE INDEX idx_job_photos_booking ON job_photos (booking_id, photo_type, taken_at);
+
+-- Storage bucket policy (set in Supabase dashboard or migration):
+-- Bucket name: "job-evidence", private (no public URL)
+-- Authenticated users may GET objects where path starts with their tenant_id
+-- Service role may read all (for dispute resolution)
+```
+
+---
+
+## Equipment / Vehicle Rental — daterange EXCLUDE USING gist
+
+Rental conflicts are date-based (full days), not timestamp-based. Uses `daterange` with `EXCLUDE USING gist` — parallel to the `tstzrange` pattern used for 1:1 appointments.
+
+```sql
+-- Requires btree_gist extension (enabled globally)
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+-- equipment table (or vehicles — same pattern)
+CREATE TABLE equipment (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES businesses(id),
+  branch_id       uuid REFERENCES branches(id),
+  name            text NOT NULL,
+  category        text NOT NULL,
+  daily_rate_kobo bigint NOT NULL,
+  security_deposit_kobo bigint NOT NULL DEFAULT 0,
+  is_available    boolean NOT NULL DEFAULT true,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+-- rental_bookings — date-range conflict prevention
+CREATE TABLE rental_bookings (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id            uuid NOT NULL REFERENCES businesses(id),
+  equipment_id         uuid NOT NULL REFERENCES equipment(id),
+  customer_id          uuid NOT NULL REFERENCES users(id),
+  rental_period        daterange NOT NULL,          -- e.g. '[2026-08-01,2026-08-05)'
+  status               booking_status NOT NULL DEFAULT 'pending',
+  held_until           timestamptz,
+  total_amount_kobo    bigint NOT NULL,
+  security_deposit_kobo bigint NOT NULL DEFAULT 0,
+  deposit_status       text NOT NULL DEFAULT 'pending' CHECK (deposit_status IN ('pending','held','returned','forfeited')),
+  notes                text,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+
+  -- Date-range exclusion: no two active rentals for the same equipment may overlap
+  CONSTRAINT no_overlapping_rentals
+    EXCLUDE USING gist (
+      equipment_id WITH =,
+      rental_period WITH &&
+    ) WHERE (status NOT IN ('cancelled', 'no_show'))
+);
+
+ALTER TABLE rental_bookings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_rental_bookings" ON rental_bookings
+  USING (tenant_id = current_user_tenant_id());
+
+-- Condition records (damage assessment at return)
+CREATE TABLE condition_records (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  rental_id       uuid NOT NULL REFERENCES rental_bookings(id),
+  recorded_by     uuid NOT NULL REFERENCES users(id),
+  condition_at    text NOT NULL CHECK (condition_at IN ('pickup', 'return')),
+  notes           text,
+  damage_found    boolean NOT NULL DEFAULT false,
+  deposit_action  text CHECK (deposit_action IN ('return', 'partial_forfeit', 'full_forfeit')),
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_rental_bookings_equipment ON rental_bookings USING GIST (equipment_id, rental_period);
+CREATE INDEX idx_rental_bookings_customer ON rental_bookings (customer_id, status);
+```
+
+---
+
+## Class Session Capacity — FOR UPDATE Atomic Enrollment
+
+Fitness/gym class booking uses a FOR UPDATE lock to atomically check and decrement capacity. Prevents overselling without EXCLUDE USING gist (which is for 1:1 time slots).
+
+```sql
+-- class_sessions table
+CREATE TABLE class_sessions (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES businesses(id),
+  branch_id       uuid NOT NULL REFERENCES branches(id),
+  instructor_id   uuid NOT NULL REFERENCES staff(id),
+  service_id      uuid NOT NULL REFERENCES services(id),  -- e.g. "Yoga", "HIIT"
+  starts_at       timestamptz NOT NULL,
+  ends_at         timestamptz NOT NULL,
+  capacity        int NOT NULL CHECK (capacity > 0),
+  enrolled_count  int NOT NULL DEFAULT 0 CHECK (enrolled_count >= 0),
+  status          text NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','in_progress','completed','cancelled')),
+  created_at      timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT enrolled_not_over_capacity CHECK (enrolled_count <= capacity)
+);
+
+-- class_enrollments table
+CREATE TABLE class_enrollments (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id      uuid NOT NULL REFERENCES class_sessions(id),
+  customer_id     uuid NOT NULL REFERENCES users(id),
+  tenant_id       uuid NOT NULL REFERENCES businesses(id),
+  status          text NOT NULL DEFAULT 'confirmed' CHECK (status IN ('confirmed','waitlisted','cancelled','attended','no_show')),
+  enrolled_at     timestamptz NOT NULL DEFAULT now(),
+  cancelled_at    timestamptz,
+
+  UNIQUE (session_id, customer_id)  -- one enrollment per customer per session
+);
+
+ALTER TABLE class_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE class_enrollments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_class_sessions" ON class_sessions USING (tenant_id = current_user_tenant_id());
+CREATE POLICY "tenant_class_enrollments" ON class_enrollments USING (tenant_id = current_user_tenant_id());
+
+-- DB function: atomic enrollment with FOR UPDATE capacity check
+-- Call from Edge Function; wraps in a transaction
+CREATE OR REPLACE FUNCTION enroll_in_class(
+  p_session_id  uuid,
+  p_customer_id uuid,
+  p_tenant_id   uuid
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_session class_sessions%ROWTYPE;
+BEGIN
+  -- Lock the session row for the duration of this transaction
+  SELECT * INTO v_session FROM class_sessions
+  WHERE id = p_session_id AND tenant_id = p_tenant_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'session_not_found');
+  END IF;
+
+  IF v_session.enrolled_count >= v_session.capacity THEN
+    -- Add to waitlist instead
+    INSERT INTO class_enrollments (session_id, customer_id, tenant_id, status)
+    VALUES (p_session_id, p_customer_id, p_tenant_id, 'waitlisted')
+    ON CONFLICT (session_id, customer_id) DO NOTHING;
+    RETURN jsonb_build_object('success', true, 'status', 'waitlisted');
+  END IF;
+
+  -- Enroll and increment counter atomically
+  INSERT INTO class_enrollments (session_id, customer_id, tenant_id, status)
+  VALUES (p_session_id, p_customer_id, p_tenant_id, 'confirmed')
+  ON CONFLICT (session_id, customer_id) DO UPDATE SET status = 'confirmed';
+
+  UPDATE class_sessions
+  SET enrolled_count = enrolled_count + 1
+  WHERE id = p_session_id;
+
+  RETURN jsonb_build_object('success', true, 'status', 'confirmed',
+    'spots_remaining', v_session.capacity - v_session.enrolled_count - 1);
+END;
+$$;
+
+-- Trigger: decrement count on cancellation
+CREATE OR REPLACE FUNCTION decrement_class_enrollment()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.status = 'cancelled' AND OLD.status = 'confirmed' THEN
+    UPDATE class_sessions SET enrolled_count = GREATEST(0, enrolled_count - 1)
+    WHERE id = NEW.session_id;
+    -- Promote first waitlisted customer
+    UPDATE class_enrollments SET status = 'confirmed'
+    WHERE id = (
+      SELECT id FROM class_enrollments
+      WHERE session_id = NEW.session_id AND status = 'waitlisted'
+      ORDER BY enrolled_at ASC LIMIT 1
+    );
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_decrement_class_enrollment
+AFTER UPDATE ON class_enrollments
+FOR EACH ROW EXECUTE FUNCTION decrement_class_enrollment();
+
+CREATE INDEX idx_class_sessions_starts_at ON class_sessions (branch_id, starts_at);
+CREATE INDEX idx_class_enrollments_session ON class_enrollments (session_id, status);
+CREATE INDEX idx_class_enrollments_customer ON class_enrollments (customer_id, status);
+```
