@@ -103,9 +103,40 @@ async function handleSendOtp(supabase: ReturnType<typeof createSupabaseClient>, 
   }
 
   const code = await createOtp(supabase, phone, purpose);
+  await deliverOtp(phone, code);
 
-  // TODO: integrate with SMS / WhatsApp provider for real OTP delivery.
-  return json({ sent: true, debug_code: code });
+  return json({ sent: true });
+}
+
+async function deliverOtp(phone: string, code: string): Promise<void> {
+  const termiiKey = Deno.env.get('TERMII_API_KEY');
+  if (!termiiKey) {
+    // Local dev without Termii configured — log to console only
+    console.warn(`[DEV] OTP for ${phone}: ${code}`);
+    return;
+  }
+
+  const senderId = Deno.env.get('TERMII_SENDER_ID') ?? 'Kajola';
+  const message = `Your Kajola verification code is ${code}. Valid for 10 minutes. Do not share this code.`;
+
+  const resp = await fetch('https://api.ng.termii.com/api/sms/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      to: phone,
+      from: senderId,
+      sms: message,
+      type: 'plain',
+      api_key: termiiKey,
+      channel: 'dnd',
+    }),
+  });
+
+  if (!resp.ok) {
+    console.error('Termii SMS delivery failed:', resp.status, await resp.text());
+    // Fail open in production so a Termii outage does not block all logins;
+    // the OTP is still stored — support can retrieve it via audit trail.
+  }
 }
 
 async function handleSignup(supabase: ReturnType<typeof createSupabaseClient>, body: any) {
