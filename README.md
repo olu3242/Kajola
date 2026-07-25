@@ -30,11 +30,11 @@ When you describe your platform, Kajola outputs all 11 sections:
 
 Kajola automatically applies these patterns for any platform:
 
-- **Payments**: Paystack (Nigeria) + Flutterwave (Pan-African) + M-Pesa (East Africa) + Cash tracking
-- **Auth**: Phone OTP primary, WhatsApp OTP fallback — no email dependency
-- **Notifications**: SMS-primary via Termii/Twilio
+- **Payments**: Paystack (Nigeria) · Flutterwave (Pan-African) · M-Pesa Daraja C2B+B2C (Kenya/East Africa) · MTN Mobile Money (Ghana) · Orange Money (Côte d'Ivoire/Senegal) · Cash tracking
+- **Auth**: Phone OTP primary via Termii (West Africa) or Africa's Talking (East Africa) · WhatsApp OTP fallback — no email dependency
+- **Notifications**: SMS-primary · USSD fallback for feature-phone users (Africa's Talking USSD gateway) · Bilingual SMS templates for multi-country platforms
 - **Mobile**: Android-first, large touch targets, skeleton screens
-- **Connectivity**: Offline action queue + sync, lazy loading, low-data mode option
+- **Connectivity**: Offline action queue + sync (expo-sqlite backed), lazy loading, low-data mode option
 - **Multi-tenant**: RLS on every table, `current_user_tenant_id()` helper, super admin bypass
 
 ---
@@ -88,16 +88,19 @@ Paystack payments. Full package.
 
 ```
 kajola/
-├── SKILL.md                        # Main skill instructions (549 lines)
+├── SKILL.md                        # Main skill instructions
 ├── references/
-│   ├── sql-patterns.md             # Reusable SQL: triggers, RLS, PostGIS, slot gen
-│   └── output-template.md          # Structured output template for all 11 sections
+│   ├── sql-patterns.md             # Reusable SQL: triggers, RLS, PostGIS, MoMo, USSD
+│   ├── output-template.md          # Structured output template for all 11 sections
+│   └── api-patterns.md             # Edge Function patterns: HMAC, M-Pesa, AT SMS, offline queue
 ├── evals/
-│   └── evals.json                  # 6 test cases, 45 assertions
+│   └── evals.json                  # 8 test cases, 67 assertions
 └── examples/
     ├── README.md                   # Examples index
-    ├── kajola-artisan-platform.md  # Full output: artisan booking marketplace (Nigeria)
-    └── toolhire-pro-nigeria.md     # Full output: equipment rental marketplace (Nigeria)
+    ├── kajola-artisan-platform.md  # Artisan booking marketplace — Nigeria (Paystack + Termii)
+    ├── toolhire-pro-nigeria.md     # Equipment rental marketplace — Nigeria (Paystack)
+    ├── boda-connect-kenya.md       # Boda-boda dispatch — Kenya (M-Pesa + Africa's Talking + USSD)
+    └── parcelrun-ghana-ci.md       # Micro-logistics — Ghana + Côte d'Ivoire (MTN + Orange Money, bilingual)
 ```
 
 ---
@@ -155,8 +158,9 @@ npm run dev
 | API Logic | Supabase Edge Functions (Deno) |
 | Styling | Tailwind CSS + shadcn/ui |
 | Monorepo | Turborepo |
-| Payments | Paystack (MVP) + Flutterwave + M-Pesa |
-| SMS | Termii (primary) / Twilio (fallback) |
+| Payments | Paystack · Flutterwave · M-Pesa Daraja · MTN MoMo · Orange Money |
+| SMS | Termii (West Africa) · Africa's Talking (East Africa) · Twilio (fallback) |
+| USSD | Africa's Talking USSD gateway (feature-phone markets) |
 
 Override any of these by specifying your preferred stack in the prompt.
 

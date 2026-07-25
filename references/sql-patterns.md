@@ -411,3 +411,169 @@ CREATE INDEX [table]_[fk_column]_idx ON [table] ([fk_column]);
 -- Text search with trigrams (for LIKE queries)
 CREATE INDEX [table]_name_trgm_idx ON [table] USING GIN (name gin_trgm_ops);
 ```
+
+---
+
+## Mobile Money Transaction Pattern
+
+Universal table for M-Pesa, MTN Mobile Money, Orange Money, and Flutterwave. Covers both C2B (customer pays) and B2C/B2B (platform pays out).
+
+```sql
+CREATE TYPE momo_provider AS ENUM (
+  'mpesa_ke',       -- M-Pesa Kenya (Daraja)
+  'mpesa_tz',       -- M-Pesa Tanzania
+  'mtn_gh',         -- MTN Mobile Money Ghana
+  'mtn_cm',         -- MTN Mobile Money Cameroon
+  'orange_ci',      -- Orange Money Côte d'Ivoire
+  'orange_sn',      -- Orange Money Senegal
+  'vodafone_gh',    -- Vodafone Cash Ghana
+  'airtel_ke'       -- Airtel Money Kenya
+);
+
+CREATE TYPE momo_direction AS ENUM ('c2b', 'b2c', 'b2b', 'reversal');
+CREATE TYPE momo_status    AS ENUM ('pending', 'completed', 'failed', 'reversed', 'timeout');
+
+CREATE TABLE mobile_money_transactions (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id        uuid NOT NULL REFERENCES tenants(id),
+  booking_id       uuid REFERENCES bookings(id),    -- nullable: some payouts not booking-linked
+  provider         momo_provider NOT NULL,
+  direction        momo_direction NOT NULL,
+  phone            text NOT NULL,                   -- E.164 without + for M-Pesa; with + for others
+  amount           integer NOT NULL,                -- whole units (shillings, cedis, francs)
+  currency         text NOT NULL,                   -- ISO 4217: KES, GHS, XOF, …
+  status           momo_status NOT NULL DEFAULT 'pending',
+  provider_ref     text,                            -- provider's transaction ID (e.g. QHX12345KL)
+  checkout_req_id  text,                            -- M-Pesa CheckoutRequestID (STK Push only)
+  idempotency_key  text NOT NULL UNIQUE,            -- e.g. 'stk_{booking_id}' or 'b2c_{booking_id}'
+  raw_callback     jsonb,                           -- full provider callback body for replay
+  failure_reason   text,
+  initiated_at     timestamptz NOT NULL DEFAULT now(),
+  settled_at       timestamptz,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_momo_tenant_status    ON mobile_money_transactions (tenant_id, status);
+CREATE INDEX idx_momo_booking          ON mobile_money_transactions (booking_id);
+CREATE INDEX idx_momo_provider_ref     ON mobile_money_transactions (provider_ref) WHERE provider_ref IS NOT NULL;
+CREATE INDEX idx_momo_idempotency      ON mobile_money_transactions (idempotency_key);
+CREATE INDEX idx_momo_checkout_req     ON mobile_money_transactions (checkout_req_id) WHERE checkout_req_id IS NOT NULL;
+
+SELECT update_updated_at('mobile_money_transactions');
+```
+
+---
+
+## USSD Session Pattern
+
+For platforms using Africa's Talking USSD gateway. Sessions are stateless — full input history arrives in each request; state is reconstructed from the `text` field.
+
+```sql
+CREATE TABLE ussd_sessions (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES tenants(id),
+  session_id    text NOT NULL,          -- Africa's Talking sessionId (unique per USSD dial)
+  phone         text NOT NULL,          -- caller's phone number (E.164)
+  service_code  text NOT NULL,          -- shortcode, e.g. '*384*1234#'
+  input_text    text NOT NULL DEFAULT '', -- full cumulative input, e.g. '1*2*3'
+  step_count    smallint NOT NULL DEFAULT 0,
+  resolved_user uuid REFERENCES auth.users(id), -- null if unauthenticated USSD
+  last_response text,                   -- last CON/END response sent (for debug)
+  ended_at      timestamptz,            -- null if session still open
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX idx_ussd_session_id ON ussd_sessions (session_id);
+CREATE INDEX idx_ussd_phone_recent     ON ussd_sessions (phone, created_at DESC);
+
+SELECT update_updated_at('ussd_sessions');
+
+-- Sessions expire in 3 minutes (Africa's Talking default); clean up daily
+SELECT cron.schedule('cleanup-ussd-sessions', '30 3 * * *', $$
+  DELETE FROM ussd_sessions WHERE created_at < now() - interval '1 day';
+$$);
+```
+
+---
+
+## SMS / Notification Log Pattern
+
+Tracks outbound SMS and push messages for delivery confirmation, retry, and audit.
+
+```sql
+CREATE TYPE sms_provider   AS ENUM ('termii', 'africa_talking', 'twilio', 'bulk_sms');
+CREATE TYPE sms_channel    AS ENUM ('sms', 'whatsapp', 'dnd', 'ussd');
+CREATE TYPE sms_status     AS ENUM ('queued', 'sent', 'delivered', 'failed', 'rejected');
+
+CREATE TABLE sms_logs (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id        uuid NOT NULL REFERENCES tenants(id),
+  provider         sms_provider NOT NULL,
+  channel          sms_channel NOT NULL DEFAULT 'sms',
+  recipient_phone  text NOT NULL,
+  locale           text NOT NULL DEFAULT 'en-NG',    -- e.g. 'en-GH', 'fr-CI', 'sw-KE'
+  template_key     text,                             -- i18n key, e.g. 'booking_confirmed'
+  message          text NOT NULL,
+  provider_msg_id  text,                             -- provider's message ID for status lookup
+  status           sms_status NOT NULL DEFAULT 'queued',
+  attempts         smallint NOT NULL DEFAULT 0,
+  last_error       text,
+  sent_at          timestamptz,
+  delivered_at     timestamptz,
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_sms_logs_tenant       ON sms_logs (tenant_id, created_at DESC);
+CREATE INDEX idx_sms_logs_phone        ON sms_logs (recipient_phone, created_at DESC);
+CREATE INDEX idx_sms_logs_status       ON sms_logs (status) WHERE status IN ('queued', 'failed');
+CREATE INDEX idx_sms_logs_provider_ref ON sms_logs (provider_msg_id) WHERE provider_msg_id IS NOT NULL;
+
+ALTER TABLE sms_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY sms_logs_manager ON sms_logs
+  USING (tenant_id = current_user_tenant_id() AND current_setting('app.role', true) IN ('manager','admin','service'));
+```
+
+---
+
+## Idempotency Key Pattern (General)
+
+Use for any operation that must not be executed more than once even if the network retries.
+
+```sql
+CREATE TABLE idempotency_keys (
+  key          text PRIMARY KEY,
+  tenant_id    uuid NOT NULL REFERENCES tenants(id),
+  operation    text NOT NULL,          -- e.g. 'stk_push', 'b2c_payout', 'otp_send'
+  status       text NOT NULL DEFAULT 'processing'
+               CHECK (status IN ('processing', 'completed', 'failed')),
+  response     jsonb,                  -- cached response to return on duplicate
+  expires_at   timestamptz NOT NULL DEFAULT now() + interval '24 hours',
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_idem_tenant_op ON idempotency_keys (tenant_id, operation);
+CREATE INDEX idx_idem_expires   ON idempotency_keys (expires_at);
+
+-- Clean up expired keys daily
+SELECT cron.schedule('cleanup-idempotency-keys', '0 4 * * *', $$
+  DELETE FROM idempotency_keys WHERE expires_at < now();
+$$);
+```
+
+Usage in Edge Function:
+
+```typescript
+async function guardIdempotent(key: string, operation: string, tenantId: string): Promise<{ isNew: boolean; cached?: unknown }> {
+  const { error, data } = await supabase
+    .from('idempotency_keys')
+    .upsert({ key, operation, tenant_id: tenantId, status: 'processing' }, { onConflict: 'key', ignoreDuplicates: true })
+    .select('status, response')
+    .single();
+
+  if (error) return { isNew: true }; // upsert won = new request
+  if (data?.status === 'completed') return { isNew: false, cached: data.response };
+  return { isNew: true }; // was processing — let it through (rare race)
+}
+```

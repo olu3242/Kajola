@@ -10,11 +10,15 @@ When Claude Code loads this skill, it reads `SKILL.md` as its instruction set. W
 
 ```
 SKILL.md                        Core instruction set. Start here.
-references/sql-patterns.md      Reusable Postgres patterns (copy-paste ready)
-references/output-template.md   Exact formatting guide for all 11 output sections
-references/api-patterns.md      Reusable Edge Function patterns (response envelope, HMAC, pagination)
-evals/evals.json                Test cases — 6 scenarios, 45 assertions
+references/sql-patterns.md      Reusable Postgres patterns (MoMo transactions, USSD sessions, SMS logs, idempotency)
+references/output-template.md   Formatting guide for all 11 sections + market-specific variants + currency table
+references/api-patterns.md      Edge Function patterns (HMAC, M-Pesa STK/B2C, Africa's Talking SMS+USSD, offline queue)
+evals/evals.json                Test cases — 8 scenarios, 67 assertions
 examples/                       Full generated outputs (reference / demo)
+  kajola-artisan-platform.md    Nigeria — Paystack + Termii
+  toolhire-pro-nigeria.md       Nigeria — Paystack + equipment rental
+  boda-connect-kenya.md         Kenya — M-Pesa Daraja + Africa's Talking + USSD
+  parcelrun-ghana-ci.md         Ghana + Côte d'Ivoire — MTN MoMo + Orange Money + bilingual
 CONTRIBUTING.md                 Guide for community contributors
 ```
 
@@ -53,7 +57,9 @@ Evals are not automated yet. To manually evaluate the skill:
 2. Run each prompt from `evals/evals.json` → `cases[*].prompt`
 3. Check the output against the assertions in `cases[*].assertions`
 4. A case passes if ≥ 85% of its assertions pass
-5. The skill passes overall if all 6 cases pass
+5. The skill passes overall if all 8 cases pass
+
+Use `bash scripts/run-evals.sh` to print all prompts and assertions in a readable format.
 
 ## Skill Quality Bar
 

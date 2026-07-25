@@ -40,6 +40,41 @@ What's inside:
 
 ---
 
+### `boda-connect-kenya.md`
+**Prompt**: "Design a boda-boda (motorcycle taxi) dispatch platform for Nairobi, Kenya. Riders join Saccos, passengers book and pay via M-Pesa STK Push, fares are settled via M-Pesa B2C payout. Feature-phone riders need a USSD fallback for earnings checks. Full system architecture."
+
+**Market**: Kenya (East Africa) · **Currency**: KES · **Payments**: M-Pesa Daraja (C2B STK Push + B2C payout) · **Auth**: Phone OTP (Africa's Talking) · **Feature-phone**: USSD via Africa's Talking
+
+What's inside:
+- PRD with 3 personas (rider, Sacco operations manager, passenger) and detailed journeys
+- PostGIS nearest-rider dispatch with `ST_DWithin` spatial query
+- Full Postgres schema — 9 tables including `trip_gps_pings` (append-only), `mpesa_transactions` with `momo_direction` enum, `phone_otps` with bcrypt hash
+- 8 API contracts covering STK Push initiation, Daraja callback, dispatch, GPS ping, and USSD handler
+- USSD menu tree in Swahili (`*384*BodaConnect#`) — earnings in KES, account status
+- Daraja HMAC callback verification (SHA-256), M-Pesa idempotency guard
+- Offline GPS queue pattern — SQLite-backed, FIFO flush on reconnect
+- Midnight EAT levy settlement cron, rider inactivity nudge, rating rollup
+- All env vars for Daraja (consumer key/secret, passkey, shortcode, B2C initiator) + Africa's Talking
+
+---
+
+### `parcelrun-ghana-ci.md`
+**Prompt**: "Design a micro-logistics platform for Accra, Ghana and Abidjan, Côte d'Ivoire. Small parcels booked by phone, delivered by independent couriers. Bilingual UI (English + French). Orange Money payments for Côte d'Ivoire, MTN Mobile Money for Ghana. Couriers often lose connectivity during deliveries."
+
+**Markets**: Ghana (GHS) + Côte d'Ivoire (XOF/CFA) · **Payments**: MTN Mobile Money + Orange Money · **Auth**: Phone OTP (Termii) · **Languages**: English (en-GH) + French (fr-CI)
+
+What's inside:
+- PRD with 4 personas in both English and French (Abena the sender, Kouassi le expéditeur, Mensah the courier, Aya the ops manager)
+- Multi-currency schema — amounts stored as integers (pesewas for GHS; whole francs for XOF)
+- Full Postgres schema — 7 tables including `parcel_scans` (append-only event log with `synced_at`), `momo_transactions` with provider enum, `idempotency_key` column
+- HMAC callback verification for both MTN (`x-callback-signature`) and Orange Money (`x-orange-signature`)
+- Offline QR scan queue — courier scans parcel label offline; `POST /offline-flush` processes batch idempotently on reconnect
+- Bilingual SMS templates — i18n JSON keyed by locale (`en-GH`, `fr-CI`); locale selected from sender profile at send time
+- Stale job re-dispatch cron (5-min), nightly reconciliation, payout retry with exponential backoff
+- Dispute hold flow — freezes payout, manager reviews GPS track + parcel photos, releases via Mobile Money reversal
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:
