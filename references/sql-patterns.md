@@ -1641,3 +1641,217 @@ SELECT cron.schedule('expire-bundle-credits', '0 1 * * *', $$
   WHERE status = 'active' AND expires_at < now();
 $$);
 ```
+
+---
+
+## Vendor Payouts & Settlement Ledger
+
+Use this pattern for two-sided marketplaces (beauty, wedding, artisan) where the platform collects from consumers and pays out to vendors. Paystack Transfer API handles NGN disbursements; `payout_ledger` is the source of truth for what is owed.
+
+```sql
+-- Paystack recipient codes (each vendor registers a bank account once)
+CREATE TABLE vendor_bank_accounts (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES tenants(id),
+  business_id           uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  account_number        text NOT NULL,
+  bank_code             text NOT NULL,
+  account_name          text NOT NULL,
+  paystack_recipient_code text UNIQUE,       -- returned by Paystack after recipient creation
+  is_active             boolean NOT NULL DEFAULT true,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_vendor_bank_accounts_business ON vendor_bank_accounts(business_id);
+ALTER TABLE vendor_bank_accounts ENABLE ROW LEVEL SECURITY;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON vendor_bank_accounts
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE POLICY "tenant_vendor_bank_accounts" ON vendor_bank_accounts
+  USING (tenant_id = current_user_tenant_id());
+
+-- Payout ledger: one row per booking → credits vendor, debits platform fee
+CREATE TABLE payout_ledger (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES tenants(id),
+  booking_id            uuid NOT NULL REFERENCES bookings(id),
+  business_id           uuid NOT NULL REFERENCES businesses(id),
+  gross_amount_kobo     bigint NOT NULL,              -- total paid by consumer
+  platform_fee_kobo     bigint NOT NULL,              -- platform commission
+  vendor_amount_kobo    bigint GENERATED ALWAYS AS    -- gross - fee
+                        (gross_amount_kobo - platform_fee_kobo) STORED,
+  status                text NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','approved','paid','failed','on_hold')),
+  payout_id             uuid REFERENCES payouts(id),
+  idempotency_key       text UNIQUE,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_payout_ledger_business ON payout_ledger(business_id, status);
+CREATE INDEX idx_payout_ledger_booking  ON payout_ledger(booking_id);
+ALTER TABLE payout_ledger ENABLE ROW LEVEL SECURITY;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON payout_ledger
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE POLICY "tenant_payout_ledger" ON payout_ledger
+  USING (tenant_id = current_user_tenant_id());
+
+-- Payouts: one batch transfer per vendor per payout cycle
+CREATE TABLE payouts (
+  id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id               uuid NOT NULL REFERENCES tenants(id),
+  business_id             uuid NOT NULL REFERENCES businesses(id),
+  bank_account_id         uuid NOT NULL REFERENCES vendor_bank_accounts(id),
+  amount_kobo             bigint NOT NULL,
+  paystack_transfer_code  text UNIQUE,        -- returned by Paystack initiate transfer
+  paystack_transfer_ref   text UNIQUE,
+  status                  text NOT NULL DEFAULT 'pending'
+                          CHECK (status IN ('pending','processing','success','failed','reversed')),
+  failure_reason          text,
+  initiated_at            timestamptz,
+  completed_at            timestamptz,
+  idempotency_key         text UNIQUE,
+  created_at              timestamptz NOT NULL DEFAULT now(),
+  updated_at              timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_payouts_business ON payouts(business_id, status);
+ALTER TABLE payouts ENABLE ROW LEVEL SECURITY;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON payouts
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE POLICY "tenant_payouts" ON payouts
+  USING (tenant_id = current_user_tenant_id());
+
+-- Ledger row created automatically when a booking completes
+CREATE OR REPLACE FUNCTION create_payout_ledger_entry()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_platform_fee_pct  numeric;
+  v_gross             bigint;
+  v_fee               bigint;
+BEGIN
+  -- Only act on transitions to 'completed' where balance has been paid
+  IF NEW.status = 'completed' AND OLD.status <> 'completed' AND NEW.balance_paid_at IS NOT NULL THEN
+    -- Read platform commission rate from tenant config (default 10%)
+    v_platform_fee_pct := coalesce(
+      (SELECT (config->>'platform_commission_pct')::numeric
+       FROM tenants WHERE id = NEW.tenant_id),
+      10
+    );
+    v_gross := NEW.total_amount_kobo;
+    v_fee   := round(v_gross * v_platform_fee_pct / 100);
+
+    INSERT INTO payout_ledger (
+      tenant_id, booking_id, business_id,
+      gross_amount_kobo, platform_fee_kobo,
+      status, idempotency_key
+    ) VALUES (
+      NEW.tenant_id, NEW.id, NEW.business_id,
+      v_gross, v_fee,
+      'pending', 'ledger-' || NEW.id
+    ) ON CONFLICT (idempotency_key) DO NOTHING;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_create_payout_ledger
+  AFTER UPDATE ON bookings
+  FOR EACH ROW EXECUTE FUNCTION create_payout_ledger_entry();
+
+-- pg_cron: weekly payout batch (every Monday 08:00 WAT = 07:00 UTC)
+SELECT cron.schedule('weekly-payout-batch', '0 7 * * 1', $$
+  INSERT INTO automation_jobs (tenant_id, job_type, run_at, payload)
+  SELECT DISTINCT tenant_id, 'payout.batch_initiate', now(), '{}'::jsonb
+  FROM payout_ledger WHERE status = 'pending'
+  ON CONFLICT DO NOTHING;
+$$);
+```
+
+---
+
+## Referral System
+
+Standard growth pattern: a referrer earns a reward when a referee completes their first qualifying booking. Credits are issued as wallet balance or loyalty points. Idempotent — a referee can only convert once.
+
+```sql
+CREATE TABLE referral_codes (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id    uuid NOT NULL REFERENCES tenants(id),
+  profile_id   uuid NOT NULL REFERENCES profiles(id) UNIQUE,
+  code         text UNIQUE NOT NULL,           -- e.g. 'AMAKA2027'
+  reward_type  text NOT NULL DEFAULT 'credit'
+               CHECK (reward_type IN ('credit','points','discount')),
+  reward_value bigint NOT NULL DEFAULT 0,      -- kobo for credit; points for points
+  use_count    integer NOT NULL DEFAULT 0,
+  is_active    boolean NOT NULL DEFAULT true,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_referral_codes_profile ON referral_codes(profile_id);
+CREATE INDEX idx_referral_codes_code    ON referral_codes(code);
+ALTER TABLE referral_codes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_referral_codes" ON referral_codes
+  USING (tenant_id = current_user_tenant_id());
+
+CREATE TABLE referral_conversions (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
+  referral_code_id uuid NOT NULL REFERENCES referral_codes(id),
+  referee_id      uuid NOT NULL REFERENCES profiles(id) UNIQUE,  -- UNIQUE: one conversion per user
+  booking_id      uuid REFERENCES bookings(id),                  -- qualifying booking
+  reward_issued   boolean NOT NULL DEFAULT false,
+  idempotency_key text UNIQUE,
+  converted_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_referral_conversions_code    ON referral_conversions(referral_code_id);
+CREATE INDEX idx_referral_conversions_referee ON referral_conversions(referee_id);
+ALTER TABLE referral_conversions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_referral_conversions" ON referral_conversions
+  USING (tenant_id = current_user_tenant_id());
+
+-- Issue referral reward on first completed booking by referee
+CREATE OR REPLACE FUNCTION process_referral_reward()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_conversion referral_conversions%ROWTYPE;
+  v_code       referral_codes%ROWTYPE;
+BEGIN
+  IF NEW.status = 'completed' AND OLD.status <> 'completed' THEN
+    SELECT rc.* INTO v_conversion
+    FROM referral_conversions rc
+    WHERE rc.referee_id = NEW.couple_id
+      AND NOT rc.reward_issued
+    LIMIT 1;
+
+    IF FOUND THEN
+      SELECT * INTO v_code FROM referral_codes WHERE id = v_conversion.referral_code_id;
+
+      IF v_code.reward_type = 'points' THEN
+        -- Credit loyalty points to referrer
+        UPDATE loyalty_accounts
+        SET points = points + v_code.reward_value
+        WHERE profile_id = (
+          SELECT profile_id FROM referral_codes WHERE id = v_conversion.referral_code_id
+        );
+      END IF;
+      -- credit/discount types handled by application layer (wallet credit, discount code)
+
+      UPDATE referral_conversions SET reward_issued = true WHERE id = v_conversion.id;
+      UPDATE referral_codes SET use_count = use_count + 1 WHERE id = v_code.id;
+    END IF;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_process_referral_reward
+  AFTER UPDATE ON bookings
+  FOR EACH ROW EXECUTE FUNCTION process_referral_reward();
+```

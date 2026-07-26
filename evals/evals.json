@@ -1883,11 +1883,147 @@
           "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
         }
       ]
+    },
+    {
+      "id": "eval-031",
+      "name": "Two-sided artisan marketplace with vendor payouts — Nigeria",
+      "prompt": "Build the complete system architecture for ArtisanPay Nigeria — a two-sided marketplace where businesses book skilled artisans (plumbers, electricians, carpenters, welders). Platform collects 100% of the service fee from the business, takes a 15% commission, and pays the artisan the remaining 85% weekly via Paystack Transfer. Paystack for collections, Termii for OTP. Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a031-01",
+          "description": "payout_ledger table for settlement tracking",
+          "check": "Section 3 contains 'payout_ledger'"
+        },
+        {
+          "id": "a031-02",
+          "description": "vendor_bank_accounts or bank_accounts for payout registration",
+          "check": "Section 3 contains ('vendor_bank_accounts' or 'bank_accounts') and ('paystack_recipient_code' or 'recipient_code')"
+        },
+        {
+          "id": "a031-03",
+          "description": "Paystack Transfer or payout initiation in API section",
+          "check": "Section 7 or Section 8 contains ('transfer' or 'Transfer' or 'payout') and 'Paystack'"
+        },
+        {
+          "id": "a031-04",
+          "description": "Platform commission stored or referenced (15%)",
+          "check": "Section 3 or Section 9 contains ('15' and ('commission' or 'platform_fee' or 'payout')) or 'platform_commission_pct'"
+        },
+        {
+          "id": "a031-05",
+          "description": "EXCLUDE USING gist for artisan slot conflict",
+          "check": "Section 3 contains 'EXCLUDE USING gist'"
+        },
+        {
+          "id": "a031-06",
+          "description": "All 9 SORF booking states present",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'completed', 'cancelled', 'no_show', 'disputed'"
+        },
+        {
+          "id": "a031-07",
+          "description": "Paystack for collections",
+          "check": "Section 7 or Section 8 contains 'Paystack' and ('NGN' or 'Nigeria' or 'PAYSTACK_SECRET_KEY')"
+        },
+        {
+          "id": "a031-08",
+          "description": "availability_windows for artisan schedules",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a031-09",
+          "description": "Weekly payout schedule or automation",
+          "check": "Section 7 or Section 3 contains ('weekly' or 'payout.batch' or 'Monday' or 'cron.*payout')"
+        },
+        {
+          "id": "a031-10",
+          "description": "Webhook HMAC verification for Paystack",
+          "check": "Section 7 contains ('x-paystack-signature' or 'HMAC' or 'createHmac')"
+        },
+        {
+          "id": "a031-11",
+          "description": "Real NGN amounts in Section 9",
+          "check": "Section 9 contains specific amounts in ₦ or NGN for artisan service fees"
+        },
+        {
+          "id": "a031-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-032",
+      "name": "Consumer fitness app with referral programme — Nigeria",
+      "prompt": "Build the complete system architecture for FitReferral Nigeria — a fitness booking app where members book gym sessions and personal training. Members earn ₦1,000 credit for every friend they refer who completes their first paid session. Paystack Recurring for monthly memberships, Termii for OTP. Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a032-01",
+          "description": "referral_codes table for member referral links",
+          "check": "Section 3 contains 'referral_codes' or 'referral_code'"
+        },
+        {
+          "id": "a032-02",
+          "description": "referral_conversions or referral tracking table",
+          "check": "Section 3 contains ('referral_conversions' or 'referral_rewards' or 'referee_id')"
+        },
+        {
+          "id": "a032-03",
+          "description": "Paystack Recurring for memberships",
+          "check": "Section 7 or Section 8 contains ('Paystack' and ('Recurring' or 'subscription' or 'plan' or 'paystack_sub_code'))"
+        },
+        {
+          "id": "a032-04",
+          "description": "class_sessions or fitness booking with capacity",
+          "check": "Section 3 contains ('class_sessions' or 'capacity' or 'max_capacity' or 'enrollments')"
+        },
+        {
+          "id": "a032-05",
+          "description": "EXCLUDE USING gist for session conflict",
+          "check": "Section 3 contains 'EXCLUDE USING gist'"
+        },
+        {
+          "id": "a032-06",
+          "description": "All 9 SORF booking states present",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'completed', 'cancelled', 'no_show', 'disputed'"
+        },
+        {
+          "id": "a032-07",
+          "description": "loyalty_accounts for member points or credit balance",
+          "check": "Section 3 contains 'loyalty_accounts'"
+        },
+        {
+          "id": "a032-08",
+          "description": "Referral reward value of ₦1,000 or 100000 kobo",
+          "check": "Section 3 or Section 9 contains ('1,000' or '1000' or '100000') and ('referral' or 'reward' or 'credit')"
+        },
+        {
+          "id": "a032-09",
+          "description": "memberships table with paystack_sub_code",
+          "check": "Section 3 contains 'memberships' or 'membership'"
+        },
+        {
+          "id": "a032-10",
+          "description": "availability_windows for trainer schedules",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a032-11",
+          "description": "Real NGN amounts in Section 9",
+          "check": "Section 9 contains specific amounts in ₦ or NGN for membership fees or session pricing"
+        },
+        {
+          "id": "a032-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 30 cases pass. Target: 30 cases, 327 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 32 cases pass. Target: 32 cases, 351 assertions."
   }
 }

@@ -1598,3 +1598,132 @@ Required env vars: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAP
 - Add `whatsapp_opted_in boolean NOT NULL DEFAULT false` to `profiles` table
 - Send WhatsApp only when `whatsapp_opted_in = true`; fall back to SMS otherwise
 - Nigeria numbers: prefix `234`, Ghana: `233`, Kenya: `254`, Côte d'Ivoire: `225`
+
+---
+
+## Paystack Transfer (Vendor Payout)
+
+Use this pattern to disburse earnings to vendors after a booking completes. Paystack Transfer API sends NGN to a registered bank account. All transfers are idempotent via a stable `reference` derived from the `payouts.id`.
+
+```typescript
+interface InitiatePayoutParams {
+  payoutId:            string;   // payouts.id — used as idempotency reference
+  recipientCode:       string;   // vendor_bank_accounts.paystack_recipient_code
+  amountKobo:          number;
+  reason?:             string;
+}
+
+interface CreateRecipientParams {
+  accountNumber: string;
+  bankCode:      string;
+  accountName:   string;
+  businessId:    string;         // stored in metadata for webhook reconciliation
+}
+
+// Step 1: Register vendor's bank account as a Paystack Transfer Recipient
+export async function createPaystackRecipient(
+  params: CreateRecipientParams
+): Promise<{ recipientCode: string }> {
+  const res = await fetch("https://api.paystack.co/transferrecipient", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${Deno.env.get("PAYSTACK_SECRET_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      type:           "nuban",
+      name:           params.accountName,
+      account_number: params.accountNumber,
+      bank_code:      params.bankCode,
+      currency:       "NGN",
+      metadata:       { business_id: params.businessId },
+    }),
+  });
+  const json = await res.json();
+  if (!json.status) throw new Error(json.message);
+  return { recipientCode: json.data.recipient_code };
+}
+
+// Step 2: Initiate transfer to vendor
+export async function initiateVendorPayout(
+  params: InitiatePayoutParams
+): Promise<{ transferCode: string; transferRef: string }> {
+  const reference = `payout-${params.payoutId}`;  // stable, not Date.now()
+
+  const res = await fetch("https://api.paystack.co/transfer", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${Deno.env.get("PAYSTACK_SECRET_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      source:    "balance",
+      amount:    params.amountKobo,
+      recipient: params.recipientCode,
+      reason:    params.reason ?? "Booking payout",
+      currency:  "NGN",
+      reference,
+    }),
+  });
+  const json = await res.json();
+  if (!json.status) throw new Error(json.message);
+  return {
+    transferCode: json.data.transfer_code,
+    transferRef:  json.data.reference,
+  };
+}
+
+// Step 3: Webhook handler for transfer events (Edge Function: confirm-transfer)
+// Paystack sends transfer.success / transfer.failed / transfer.reversed
+// Verify HMAC-SHA-512 on x-paystack-signature before processing
+export async function handleTransferWebhook(
+  rawBody: string,
+  sig: string,
+  supabase: SupabaseClient
+): Promise<void> {
+  const expected = createHmac("sha512", Deno.env.get("PAYSTACK_SECRET_KEY")!)
+    .update(rawBody).digest("hex");
+  if (sig !== expected) throw new Error("Invalid signature");
+
+  const event = JSON.parse(rawBody);
+  const { reference, transfer_code } = event.data;
+  const payoutId = reference.replace("payout-", "");
+
+  if (event.event === "transfer.success") {
+    await supabase.from("payouts").update({
+      status:       "success",
+      completed_at: new Date().toISOString(),
+    }).eq("id", payoutId);
+
+    await supabase.from("payout_ledger").update({ status: "paid" })
+      .eq("payout_id", payoutId);
+  }
+
+  if (event.event === "transfer.failed") {
+    await supabase.from("payouts").update({
+      status:         "failed",
+      failure_reason: event.data.reason ?? "unknown",
+    }).eq("id", payoutId);
+
+    await supabase.from("payout_ledger").update({ status: "failed" })
+      .eq("payout_id", payoutId);
+  }
+
+  if (event.event === "transfer.reversed") {
+    await supabase.from("payouts").update({ status: "reversed" })
+      .eq("id", payoutId);
+    // Move ledger rows back to 'pending' for retry
+    await supabase.from("payout_ledger").update({ status: "pending", payout_id: null })
+      .eq("payout_id", payoutId);
+  }
+}
+```
+
+Required env vars: `PAYSTACK_SECRET_KEY`
+
+**Setup notes**:
+- Enable Transfer on your Paystack dashboard (Transfers → Settings → Enable transfers)
+- Use `Paystack.verifyAccountNumber` before creating a recipient to validate account details
+- Nigeria: 9-digit NUBAN account numbers; bank codes from `GET https://api.paystack.co/bank`
+- Always use a stable `reference = payout-{uuid}` — never append timestamps
+- Paystack balance must be funded before transfer; monitor via `GET /balance`

@@ -189,6 +189,27 @@ Apply these patterns to any platform where consumers discover providers (marketp
 - **Search API**: expose `GET /providers/search?q=&lat=&lng=&radius_km=&category=&city=` returning provider profiles with distance; use `ST_DWithin` for geo-filter and `search_vector @@ websearch_to_tsquery` for text; max radius 25km for urban Africa markets
 - **Shareable booking link**: every provider profile has a canonical booking URL (`/{slug}/book`) that works without authentication — customer sees available slots and completes phone OTP in-flow
 
+### Vendor Payouts & Settlement Defaults
+
+Apply to any two-sided marketplace where the platform collects from consumers and pays out to vendors (beauty marketplaces, wedding vendor platforms, artisan platforms, cleaning/home-services).
+
+- **Payout ledger**: add `payout_ledger` table (from sql-patterns.md); populated automatically by trigger when `bookings.status` transitions to `'completed'`; never compute vendor amounts in application code
+- **Platform commission**: store commission rate in `tenants.config jsonb` (key: `"platform_commission_pct"`, default: `10`); the `create_payout_ledger_entry()` trigger reads it — never hardcode a rate in code
+- **Bank accounts**: add `vendor_bank_accounts` table with `paystack_recipient_code text UNIQUE`; create Paystack Transfer Recipients at vendor onboarding before they receive their first payout
+- **Payout schedule**: default to weekly batch (Monday 08:00 WAT via pg_cron); use `automation_jobs` with `job_type = 'payout.batch_initiate'` to trigger the Edge Function
+- **Transfer HMAC**: verify Paystack transfer webhooks with HMAC-SHA-512 on `x-paystack-signature` (same key as charge webhooks); handle `transfer.success`, `transfer.failed`, and `transfer.reversed`
+- **Idempotency**: payout `reference = payout-{payouts.id}` — stable UUID-based; never append timestamps
+
+### Referral & Growth Defaults
+
+Apply to any platform that wants organic growth through user referrals (beauty, fitness, wellness, wedding, home services).
+
+- **Referral codes**: add `referral_codes` table (from sql-patterns.md); generate a vanity code at signup (e.g. `AMAKA2027`); one code per profile, one conversion per referee (`UNIQUE` on `referral_conversions.referee_id`)
+- **Reward types**: support `credit` (kobo added to wallet), `points` (loyalty points), `discount` (single-use promo code); store `reward_type` and `reward_value` on `referral_codes`
+- **Conversion trigger**: reward issues automatically when the referee completes their first qualifying booking (DB trigger `trg_process_referral_reward` from sql-patterns.md)
+- **Default reward**: ₦500–₦2,000 credit for referrer per converted friend (adjust per unit economics of the vertical)
+- **Attribution window**: referee must sign up using the referral code within 30 days; enforce via `referral_conversions.converted_at < referral_codes.created_at + interval '30 days'`
+
 ---
 
 ## Vertical-Specific Schema Patterns

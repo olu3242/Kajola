@@ -188,6 +188,7 @@ assert_contains "references/api-patterns.md" "Flutterwave\|FLW_SECRET_KEY\|flutt
 assert_contains "references/api-patterns.md" "Whereby\|WHEREBY_API_KEY\|whereby" "Whereby video room pattern in api-patterns.md"
 assert_contains "references/api-patterns.md" "Orange Money\|ORANGE_CLIENT_SECRET\|orange.*money\|orangemoney" "Orange Money pattern in api-patterns.md"
 assert_contains "references/api-patterns.md" "WhatsApp\|WHATSAPP_PHONE_NUMBER_ID\|graph.facebook.com" "WhatsApp Business API pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "initiateVendorPayout\|paystack.*transfer\|transferrecipient\|transfer.success" "Paystack Transfer payout pattern in api-patterns.md"
 
 echo ""
 echo "[ SORF — SQL patterns checks (extended) ]"
@@ -197,6 +198,8 @@ assert_contains "references/sql-patterns.md" "daterange.*EXCLUDE\|EXCLUDE.*dater
 assert_contains "references/sql-patterns.md" "class_sessions\|enroll_in_class\|FOR UPDATE" "Class session capacity pattern in sql-patterns.md"
 assert_contains "references/sql-patterns.md" "multi.*currency\|supported_currency\|payment_provider.*enum\|fx_rate" "Multi-currency pattern in sql-patterns.md"
 assert_contains "references/sql-patterns.md" "deliverables\|deliverable_type\|event_packages" "Event deliverables pattern in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "payout_ledger\|vendor_bank_accounts\|paystack_recipient_code" "Vendor payout ledger pattern in sql-patterns.md"
+assert_contains "references/sql-patterns.md" "referral_codes\|referral_conversions" "Referral system pattern in sql-patterns.md"
 
 echo ""
 echo "[ Output template — vertical-specific tables ]"
@@ -226,10 +229,10 @@ fi
 
 # At least 14 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 28 ]]; then
-  check "evals.json has at least 28 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 30 ]]; then
+  check "evals.json has at least 30 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 28 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 30 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -251,10 +254,10 @@ import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 310 ]]; then
-  check "evals.json has at least 310 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 340 ]]; then
+  check "evals.json has at least 340 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 310 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 340 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present
