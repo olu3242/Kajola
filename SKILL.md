@@ -176,6 +176,19 @@ Apply these patterns automatically to every platform generated:
 - **Demand forecasting**: rolling 30-day booking count by service + time slot; used for surge pricing prompt and staff rota optimisation
 - **Re-booking nudge**: send personalised WhatsApp message N days after last appointment (N = median rebooking interval for that service category)
 
+### Consumer Marketplace & Discovery Defaults
+
+Apply these patterns to any platform where consumers discover providers (marketplace model). These are in addition to — not instead of — the booking engine defaults above.
+
+- **Public provider profile**: every business and/or staff member must have a `provider_profiles` row with `slug text UNIQUE` (e.g. `"taiwo-cuts-ikeja"`); serve discovery page at `/{slug}`; index `location geography(POINT)` + `search_vector tsvector` for map and text search
+- **Portfolio gallery**: add `portfolio_photos` table (from sql-patterns.md); every beauty, wellness, and creative-services platform must include this — it is the primary conversion tool for consumer discovery
+- **Commission structure**: for any multi-staff platform where staff are paid per booking, add `commission_settings` + `staff_earnings` tables (from sql-patterns.md); without this, business owners cannot pay their staff correctly
+- **WhatsApp first**: use WhatsApp Business API (from api-patterns.md) as the primary channel for booking confirmation and reminders when `profiles.whatsapp_opted_in = true`; fall back to SMS; WhatsApp has 93%+ penetration among smartphone users in Nigeria, Ghana, and Kenya
+- **Pre-paid bundles**: for beauty, fitness, and wellness platforms add `service_bundles` + `bundle_credits` tables (from sql-patterns.md); bundle pre-payment increases customer lifetime value and reduces churn
+- **Walk-in / POS**: for physical service businesses, model walk-in transactions in `walkin_queue` (`customer_name text`, `requested_service_id uuid`, `assigned_staff_id uuid`, `status` enum `waiting|in_service|completed|left`); POS payment logged to `transactions` with `payment_method` enum `('card','cash','transfer','mobile_money','bundle_credit')`
+- **Search API**: expose `GET /providers/search?q=&lat=&lng=&radius_km=&category=&city=` returning provider profiles with distance; use `ST_DWithin` for geo-filter and `search_vector @@ websearch_to_tsquery` for text; max radius 25km for urban Africa markets
+- **Shareable booking link**: every provider profile has a canonical booking URL (`/{slug}/book`) that works without authentication — customer sees available slots and completes phone OTP in-flow
+
 ---
 
 ## Vertical-Specific Schema Patterns
@@ -466,8 +479,8 @@ Generate the complete schema. No "// add more columns here" placeholders.
 | `staff` | FK to `branches`, `rating numeric(3,2)`, `is_active bool`, `tenant_id` |
 | `services` | FK to `businesses`, `duration_minutes int`, `price_kobo bigint`, `tenant_id` |
 | `availability_windows` | FK to `staff`, `day_of_week int CHECK (0–6)`, `start_time time`, `end_time time` |
-| `availability_overrides` | FK to `staff`, `date date`, `is_available bool`, `start_time time`, `end_time time` |
-| `bookings` | SORF 9-state `booking_status` enum, `EXCLUDE USING gist` on `(staff_id, tstzrange(starts_at, ends_at, '[)'))`, `held_until timestamptz`, `deposit_paid bool` |
+| `availability_overrides` | FK to `staff`, `override_type text CHECK ('available'\|'blocked')`, `starts_at timestamptz`, `ends_at timestamptz` |
+| `bookings` | SORF 9-state `booking_status` enum, `EXCLUDE USING gist` on `(staff_id, branch_id, tstzrange(starts_at, ends_at, '[)'))`, `held_until timestamptz`, `deposit_paid bool` |
 | `waitlist_entries` | FK to `bookings.service_id` or `staff_id`, `customer_id`, `notified_at timestamptz`; trigger on booking cancellation |
 | `loyalty_accounts` | FK to `customers`/`users`, `points_balance int`, `tier text` |
 | `loyalty_transactions` | FK to `loyalty_accounts`, `points_delta int`, `booking_id`, idempotency key |

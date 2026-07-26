@@ -187,6 +187,7 @@ assert_contains "references/api-patterns.md" "Paystack.*Recurring\|createPaystac
 assert_contains "references/api-patterns.md" "Flutterwave\|FLW_SECRET_KEY\|flutterwave" "Flutterwave payment pattern in api-patterns.md"
 assert_contains "references/api-patterns.md" "Whereby\|WHEREBY_API_KEY\|whereby" "Whereby video room pattern in api-patterns.md"
 assert_contains "references/api-patterns.md" "Orange Money\|ORANGE_CLIENT_SECRET\|orange.*money\|orangemoney" "Orange Money pattern in api-patterns.md"
+assert_contains "references/api-patterns.md" "WhatsApp\|WHATSAPP_PHONE_NUMBER_ID\|graph.facebook.com" "WhatsApp Business API pattern in api-patterns.md"
 
 echo ""
 echo "[ SORF — SQL patterns checks (extended) ]"
@@ -225,10 +226,10 @@ fi
 
 # At least 14 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 26 ]]; then
-  check "evals.json has at least 26 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 28 ]]; then
+  check "evals.json has at least 28 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 26 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 28 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -250,10 +251,10 @@ import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 280 ]]; then
-  check "evals.json has at least 280 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 310 ]]; then
+  check "evals.json has at least 310 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 280 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 310 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present

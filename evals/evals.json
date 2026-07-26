@@ -1747,11 +1747,147 @@
           "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
         }
       ]
+    },
+    {
+      "id": "eval-029",
+      "name": "Two-sided beauty marketplace — Nigeria (HairBook-style)",
+      "prompt": "Build the complete system architecture for HairBook Nigeria — a two-sided marketplace where consumers discover and book hair stylists, nail technicians, and makeup artists. Stylists manage their own schedules and portfolios. Platform takes 20% commission on all bookings. Paystack for payments, Termii for OTP, WhatsApp Business API for booking confirmations and reminders. Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a029-01",
+          "description": "provider_profiles table with slug and full-text search",
+          "check": "Section 3 contains 'provider_profiles' with 'slug' and ('search_vector' or 'tsvector')"
+        },
+        {
+          "id": "a029-02",
+          "description": "portfolio_photos table for stylist gallery",
+          "check": "Section 3 contains 'portfolio_photos' table"
+        },
+        {
+          "id": "a029-03",
+          "description": "commission_settings and staff_earnings for 20% cut",
+          "check": "Section 3 contains 'commission_settings' and 'staff_earnings'"
+        },
+        {
+          "id": "a029-04",
+          "description": "WhatsApp Business API for booking notifications",
+          "check": "Section 7 or Section 8 contains ('WhatsApp' or 'WHATSAPP') and ('template' or 'booking_confirmed' or 'appointment_reminder')"
+        },
+        {
+          "id": "a029-05",
+          "description": "WHATSAPP env vars in Section 8",
+          "check": "Section 8 contains 'WHATSAPP_PHONE_NUMBER_ID' or 'WHATSAPP_ACCESS_TOKEN'"
+        },
+        {
+          "id": "a029-06",
+          "description": "EXCLUDE USING gist for booking conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist'"
+        },
+        {
+          "id": "a029-07",
+          "description": "All 9 SORF booking states present",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'in_progress', 'completed', 'cancelled', 'no_show', 'disputed'"
+        },
+        {
+          "id": "a029-08",
+          "description": "service_bundles or bundle_credits for pre-paid packs",
+          "check": "Section 3 contains ('service_bundles' or 'bundle_credits')"
+        },
+        {
+          "id": "a029-09",
+          "description": "walkin_queue for walk-in POS",
+          "check": "Section 3 contains 'walkin_queue'"
+        },
+        {
+          "id": "a029-10",
+          "description": "loyalty_accounts and loyalty_transactions",
+          "check": "Section 3 contains 'loyalty_accounts' and 'loyalty_transactions'"
+        },
+        {
+          "id": "a029-11",
+          "description": "Real NGN amounts in monetization section",
+          "check": "Section 9 contains specific amounts in ₦ or NGN for platform commission or service fees"
+        },
+        {
+          "id": "a029-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-030",
+      "name": "Wedding & event vendor marketplace — Nigeria",
+      "prompt": "Build the complete system architecture for WedPlan Nigeria — a marketplace where couples book wedding vendors (photographers, caterers, DJs, florists, and venues) for their wedding day. Multi-vendor bookings tied to a single event date. Mandatory 50% deposit to hold a vendor. Paystack for payments, Termii for OTP. Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a030-01",
+          "description": "events or wedding_events table for the anchor date",
+          "check": "Section 3 contains ('events' or 'wedding_events' or 'event_date') table or column"
+        },
+        {
+          "id": "a030-02",
+          "description": "Multi-vendor booking model (bookings linked to event)",
+          "check": "Section 3 contains 'event_id' or multiple vendor categories linked to a booking"
+        },
+        {
+          "id": "a030-03",
+          "description": "deposit_policy or 50% deposit requirement",
+          "check": "Section 3 contains 'deposit_policy' or ('deposit' and ('50' or '0.5' or 'percent'))"
+        },
+        {
+          "id": "a030-04",
+          "description": "EXCLUDE USING gist for vendor slot conflict on event date",
+          "check": "Section 3 contains 'EXCLUDE USING gist'"
+        },
+        {
+          "id": "a030-05",
+          "description": "All 9 SORF booking states present",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'completed', 'cancelled', 'no_show', 'disputed'"
+        },
+        {
+          "id": "a030-06",
+          "description": "Paystack for Nigeria payments",
+          "check": "Section 7 or Section 8 contains 'Paystack' and ('NGN' or 'Nigeria')"
+        },
+        {
+          "id": "a030-07",
+          "description": "Termii or similar for OTP",
+          "check": "Section 8 contains ('TERMII_API_KEY' or 'Termii') or Section 2 contains 'Termii'"
+        },
+        {
+          "id": "a030-08",
+          "description": "vendor_categories or service_categories for vendor types",
+          "check": "Section 3 contains ('vendor_categor' or 'service_categor' or ('photographer' and 'caterer') or ('vendor_type'))"
+        },
+        {
+          "id": "a030-09",
+          "description": "availability_windows for vendor availability",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a030-10",
+          "description": "waitlist or enquiry flow for booked-out dates",
+          "check": "Section 3 contains ('waitlist' or 'enquiry' or 'inquiry')"
+        },
+        {
+          "id": "a030-11",
+          "description": "Real NGN amounts for vendor packages in Section 9",
+          "check": "Section 9 contains specific amounts in ₦ or NGN for vendor packages or platform fee"
+        },
+        {
+          "id": "a030-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 28 cases pass. Target: 28 cases, 303 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 30 cases pass. Target: 30 cases, 327 assertions."
   }
 }

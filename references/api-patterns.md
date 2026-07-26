@@ -1358,3 +1358,243 @@ const path = await uploadPrivateFile(
 - Prefer short expiry (300s) for sensitive documents; use 3600s for app-session contexts only
 
 Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+---
+
+## WhatsApp Business API (Meta Cloud API)
+
+Send booking confirmations, reminders, and OTP messages via WhatsApp. Use WhatsApp as the primary notification channel for customers who opt in (`profiles.whatsapp_opted_in = true`); fall back to SMS (Termii/Africa's Talking) for all others.
+
+### Send WhatsApp Template Message
+
+```typescript
+// supabase/functions/_shared/whatsapp.ts
+
+interface WhatsAppTemplateMessage {
+  to: string;                          // E.164 phone number, e.g. "+2348012345678"
+  templateName: string;                // Approved template name on Meta dashboard
+  languageCode?: string;               // Default: "en"
+  components?: WhatsAppTemplateComponent[];
+}
+
+interface WhatsAppTemplateComponent {
+  type: "header" | "body" | "button";
+  parameters: Array<
+    | { type: "text"; text: string }
+    | { type: "date_time"; date_time: { fallback_value: string } }
+    | { type: "currency"; currency: { fallback_value: string; code: string; amount_1000: number } }
+    | { type: "payload"; payload: string }
+  >;
+}
+
+interface WhatsAppMessageResponse {
+  messages: Array<{ id: string }>;
+}
+
+export async function sendWhatsAppTemplate(
+  msg: WhatsAppTemplateMessage
+): Promise<WhatsAppMessageResponse> {
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID")!;
+  const accessToken   = Deno.env.get("WHATSAPP_ACCESS_TOKEN")!;
+
+  const res = await fetch(
+    `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: msg.to.replace("+", ""),
+        type: "template",
+        template: {
+          name: msg.templateName,
+          language: { code: msg.languageCode ?? "en" },
+          components: msg.components ?? [],
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(`WhatsApp API error: ${err.error?.message ?? res.statusText}`);
+  }
+  return res.json();
+}
+```
+
+### Booking Confirmation Message
+
+```typescript
+// Template name: "booking_confirmed" (pre-approved on Meta Business Manager)
+// Template body: "Hi {{1}}, your appointment at {{2}} is confirmed for {{3}} at {{4}}. 📍 {{5}}. Ref: {{6}}"
+
+export async function sendBookingConfirmationWhatsApp(params: {
+  phone: string;
+  customerName: string;
+  businessName: string;
+  appointmentDate: string;   // e.g. "Monday, 28 July 2026"
+  appointmentTime: string;   // e.g. "10:00 AM"
+  branchAddress: string;
+  bookingRef: string;
+}): Promise<void> {
+  await sendWhatsAppTemplate({
+    to: params.phone,
+    templateName: "booking_confirmed",
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: params.customerName },
+          { type: "text", text: params.businessName },
+          { type: "text", text: params.appointmentDate },
+          { type: "text", text: params.appointmentTime },
+          { type: "text", text: params.branchAddress },
+          { type: "text", text: params.bookingRef },
+        ],
+      },
+    ],
+  });
+}
+```
+
+### Appointment Reminder Message
+
+```typescript
+// Template name: "appointment_reminder"
+// Template body: "Reminder: {{1}}, you have an appointment at {{2}} tomorrow at {{3}}. Reply CANCEL to cancel."
+
+export async function sendAppointmentReminderWhatsApp(params: {
+  phone: string;
+  customerName: string;
+  businessName: string;
+  appointmentTime: string;
+}): Promise<void> {
+  await sendWhatsAppTemplate({
+    to: params.phone,
+    templateName: "appointment_reminder",
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: params.customerName },
+          { type: "text", text: params.businessName },
+          { type: "text", text: params.appointmentTime },
+        ],
+      },
+    ],
+  });
+}
+```
+
+### WhatsApp OTP Message
+
+```typescript
+// Template name: "otp_code" (must use Meta's OTP template category)
+// Template body: "{{1}} is your {{2}} verification code. Valid for {{3}} minutes."
+
+export async function sendWhatsAppOtp(params: {
+  phone: string;
+  otpCode: string;
+  platformName: string;
+  expiryMinutes?: number;
+}): Promise<void> {
+  await sendWhatsAppTemplate({
+    to: params.phone,
+    templateName: "otp_code",
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: params.otpCode },
+          { type: "text", text: params.platformName },
+          { type: "text", text: String(params.expiryMinutes ?? 5) },
+        ],
+      },
+    ],
+  });
+}
+```
+
+### WhatsApp Webhook Handler (Delivery Status)
+
+```typescript
+// POST /functions/v1/whatsapp-webhook
+// Handles delivery receipts and inbound "CANCEL" replies from customers
+
+const VERIFY_TOKEN = Deno.env.get("WHATSAPP_WEBHOOK_VERIFY_TOKEN")!;
+
+serve(async (req) => {
+  // GET: Meta webhook verification handshake
+  if (req.method === "GET") {
+    const url    = new URL(req.url);
+    const mode   = url.searchParams.get("hub.mode");
+    const token  = url.searchParams.get("hub.verify_token");
+    const challenge = url.searchParams.get("hub.challenge");
+    if (mode === "subscribe" && token === VERIFY_TOKEN) {
+      return new Response(challenge, { status: 200 });
+    }
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  // POST: incoming event
+  const body = await req.json();
+  const entry = body.entry?.[0];
+  const change = entry?.changes?.[0];
+  const value  = change?.value;
+
+  // Delivery/read status update
+  if (value?.statuses?.length) {
+    for (const status of value.statuses) {
+      // status.id = WhatsApp message ID, status.status = 'sent'|'delivered'|'read'|'failed'
+      await supabase.from("notification_logs").update({
+        delivery_status: status.status,
+        delivered_at: status.status === "delivered" ? new Date().toISOString() : undefined,
+        read_at:      status.status === "read"      ? new Date().toISOString() : undefined,
+      }).eq("provider_message_id", status.id);
+    }
+  }
+
+  // Inbound text message (e.g. customer replies "CANCEL")
+  if (value?.messages?.length) {
+    for (const message of value.messages) {
+      if (message.type === "text") {
+        const text = message.text.body.trim().toUpperCase();
+        const phone = `+${message.from}`;
+        if (text === "CANCEL") {
+          // Find the customer's next upcoming booking and cancel it
+          const { data: customer } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("phone", phone)
+            .maybeSingle();
+          if (customer) {
+            await supabase
+              .from("bookings")
+              .update({ status: "cancelled", cancellation_reason: "customer_whatsapp_cancel" })
+              .eq("customer_id", customer.id)
+              .eq("status", "confirmed")
+              .gte("starts_at", new Date().toISOString())
+              .order("starts_at", { ascending: true })
+              .limit(1);
+          }
+        }
+      }
+    }
+  }
+
+  return new Response("OK", { status: 200 });
+});
+```
+
+Required env vars: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`
+
+**Setup notes**:
+- Register on Meta for Developers → create a WhatsApp Business app → get a test phone number
+- All template messages must be pre-approved by Meta before sending (allow 48–72h for approval)
+- Add `whatsapp_opted_in boolean NOT NULL DEFAULT false` to `profiles` table
+- Send WhatsApp only when `whatsapp_opted_in = true`; fall back to SMS otherwise
+- Nigeria numbers: prefix `234`, Ghana: `233`, Kenya: `254`, Côte d'Ivoire: `225`

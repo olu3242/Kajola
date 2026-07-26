@@ -128,7 +128,7 @@ kajola/
 │   ├── output-template.md          # Structured output template for all 11 sections
 │   └── api-patterns.md             # Edge Function patterns: HMAC, M-Pesa, AT SMS, offline queue
 ├── evals/
-│   └── evals.json                  # 28 test cases, 303 assertions
+│   └── evals.json                  # 30 test cases, 327 assertions
 ├── supabase/
 │   ├── migrations/                 # Reference migrations (SORF baseline schema)
 │   └── functions/
@@ -137,7 +137,7 @@ kajola/
 ├── scripts/
 │   ├── check-example.sh            # SORF compliance validator for individual example files (50 checks)
 │   ├── run-evals.sh                # Eval runner: print prompts + assertions for manual testing
-│   └── validate-skill.sh           # Full skill structure validator (115 checks)
+│   └── validate-skill.sh           # Full skill structure validator (116 checks)
 └── examples/
     ├── README.md                   # Examples index
     ├── kajola-artisan-platform.md  # Artisan booking marketplace — Nigeria (Paystack + Termii)
@@ -152,7 +152,8 @@ kajola/
     ├── cutculture-barbershop-nigeria.md  # Barbershop franchise — Nigeria (Paystack + Termii + 5-stamp loyalty + franchise royalty)
     ├── cleanrun-laundry-nigeria.md       # Laundry pickup & delivery — Nigeria (GPS dispatch + job photos + weight-based pricing)
     ├── pawperfect-pet-nigeria.md         # Pet grooming & vet clinic — Nigeria (vaccine records + health notes + per-pet booking)
-    └── doclink-telemedicine-ghana.md     # Multi-specialty telemedicine — Ghana (MTN MoMo + Africa's Talking + Whereby + USSD)
+    ├── doclink-telemedicine-ghana.md     # Multi-specialty telemedicine — Ghana (MTN MoMo + Africa's Talking + Whereby + USSD)
+    └── hairbook-nigeria.md               # Two-sided beauty marketplace — Nigeria (Paystack + Termii + WhatsApp + provider profiles)
 ```
 
 ---
