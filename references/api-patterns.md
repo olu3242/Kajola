@@ -348,7 +348,7 @@ async function transitionBookingState(
   if (toStatus === "checked_in")  patch.checked_in_at = new Date().toISOString();
   if (toStatus === "in_progress") patch.started_at    = new Date().toISOString();
   if (toStatus === "completed")   patch.completed_at  = new Date().toISOString();
-  if (toStatus === "cancelled")   { patch.cancelled_at = new Date().toISOString(); patch.cancel_reason = meta.reason ?? ""; }
+  if (toStatus === "cancelled")   { patch.cancelled_at = new Date().toISOString(); patch.cancellation_reason = meta.reason ?? ""; }
   if (toStatus === "confirmed")   patch.held_until    = null;  // clear hold timer
 
   // 3. Apply
@@ -361,9 +361,9 @@ async function transitionBookingState(
 
   // 4. Enqueue automation event (fire-and-forget via automation_jobs)
   await supabase.from("automation_jobs").insert({
-    event_type:      `booking.${toStatus}`,
+    job_type:        `booking.${toStatus}`,
     payload:         { booking_id: bookingId, from_status: from, actor_id: meta.userId },
-    idempotency_key: `booking-${bookingId}-${toStatus}-${Date.now()}`,
+    idempotency_key: `booking-${bookingId}-${toStatus}`,
   });
 
   return { ok: true };
@@ -429,10 +429,10 @@ async function initiateDeposit(req: Request): Promise<Response> {
 
   const idempotencyKey = `booking-${booking_id}-deposit`;
 
-  // Upsert momo_transactions — idempotent: if already initiated, return existing reference
-  const { data: existing } = await supabase.from("momo_transactions").select("provider_reference").eq("idempotency_key", idempotencyKey).maybeSingle();
-  if (existing?.provider_reference) {
-    return ok({ checkout_request_id: existing.provider_reference, message: "STK Push already sent — check your phone" });
+  // Upsert mobile_money_transactions — idempotent: if already initiated, return existing reference
+  const { data: existing } = await supabase.from("mobile_money_transactions").select("provider_ref").eq("idempotency_key", idempotencyKey).maybeSingle();
+  if (existing?.provider_ref) {
+    return ok({ checkout_request_id: existing.provider_ref, message: "STK Push already sent — check your phone" });
   }
 
   // Initiate STK Push
@@ -443,15 +443,15 @@ async function initiateDeposit(req: Request): Promise<Response> {
     description: `Deposit`,
   });
 
-  await supabase.from("momo_transactions").insert({
-    tenant_id:       booking.tenant_id,
-    booking_id:      booking_id,
-    customer_id:     user.id,
-    provider:        "mpesa_ke",
-    momo_direction:  "c2b",
-    amount_kes:      booking.deposit_kes,
+  await supabase.from("mobile_money_transactions").insert({
+    tenant_id:    booking.tenant_id,
+    booking_id:   booking_id,
+    customer_id:  user.id,
+    provider:     "mpesa_ke",
+    direction:    "c2b",
+    amount:       booking.deposit_kes,
     phone,
-    provider_reference: CheckoutRequestID,
+    provider_ref: CheckoutRequestID,
     idempotency_key: idempotencyKey,
   });
 
@@ -469,19 +469,19 @@ async function creditLoyaltyPoints(bookingId: string): Promise<void> {
   if (!booking) return;
 
   const idempotencyKey = `loyalty-${bookingId}-earn`;
-  const { data: existing } = await supabase.from("loyalty_transactions").select("id").eq("booking_id", bookingId).eq("tx_type", "earn").maybeSingle();
+  const { data: existing } = await supabase.from("loyalty_transactions").select("id").eq("idempotency_key", idempotencyKey).maybeSingle();
   if (existing) return;  // already credited — idempotent
 
-  // 1 point per KES spent (integer, no sub-point)
-  const points = booking.price_kes;
+  // 1 point per currency unit spent (integer, no sub-point)
+  const pointsDelta = booking.total_amount ?? booking.price_kes ?? 0;
 
   // Upsert loyalty account (create if first booking)
   const { data: account } = await supabase.from("loyalty_accounts")
     .upsert({ tenant_id: booking.tenant_id, customer_id: booking.customer_id }, { onConflict: "customer_id" })
     .select("id, points_balance, lifetime_points").single();
 
-  const newBalance       = account.points_balance  + points;
-  const newLifetime      = account.lifetime_points + points;
+  const newBalance  = account.points_balance  + pointsDelta;
+  const newLifetime = account.lifetime_points + pointsDelta;
 
   // Determine tier upgrade
   const newTier = newLifetime >= 50000 ? "platinum" : newLifetime >= 20000 ? "gold" : newLifetime >= 5000 ? "silver" : "bronze";
@@ -489,12 +489,14 @@ async function creditLoyaltyPoints(bookingId: string): Promise<void> {
   await Promise.all([
     supabase.from("loyalty_accounts").update({ points_balance: newBalance, lifetime_points: newLifetime, tier: newTier }).eq("id", account.id),
     supabase.from("loyalty_transactions").insert({
-      tenant_id:    booking.tenant_id,
-      account_id:   account.id,
-      booking_id:   bookingId,
-      tx_type:      "earn",
-      points:       points,
-      balance_after: newBalance,
+      tenant_id:      booking.tenant_id,
+      account_id:     account.id,
+      booking_id:     bookingId,
+      event_type:     "points_earned",
+      points_delta:   pointsDelta,
+      balance_after:  newBalance,
+      description:    `Earned ${pointsDelta} points for booking ${bookingId}`,
+      idempotency_key: idempotencyKey,
     }),
   ]);
 }
@@ -853,6 +855,8 @@ interface FlutterwaveChargeParams {
   customerPhone: string;
   customerName: string;
   redirectUrl: string;     // where to send customer after payment
+  platformName?: string;   // displayed on the Flutterwave payment page
+  logoUrl?: string;        // platform logo URL for the payment page
   meta?: Record<string, unknown>;
 }
 
@@ -877,8 +881,8 @@ async function initiateFlutterwavePayment(
       },
       meta: params.meta ?? {},
       customizations: {
-        title: "CleanRun Payment",
-        logo: "https://cleanrun.app/logo.png",
+        title: params.platformName ?? "Payment",
+        ...(params.logoUrl ? { logo: params.logoUrl } : {}),
       },
     }),
   });

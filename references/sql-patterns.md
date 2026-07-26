@@ -143,44 +143,23 @@ Document which operations use service role vs anon/authenticated keys.
 
 ## Booking / Slot Conflict Prevention
 
-Prevent double-booking at the database level using an exclusion constraint (requires `btree_gist` extension):
+Prevent double-booking at the database level using an exclusion constraint scoped to `(staff_id, branch_id)`. Requires the `btree_gist` extension. Only active bookings block slots — cancelled, no_show, and disputed bookings free the slot.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS "btree_gist";
 
+-- SORF-compliant: scoped to (staff_id, branch_id), excludes all terminal/free states
 ALTER TABLE bookings
-  ADD CONSTRAINT no_double_booking
+  ADD CONSTRAINT no_staff_double_booking
   EXCLUDE USING gist (
-    provider_id WITH =,
+    staff_id  WITH =,
+    branch_id WITH =,
     tstzrange(starts_at, ends_at, '[)') WITH &&
   )
-  WHERE (status NOT IN ('cancelled', 'rejected'));
+  WHERE (status NOT IN ('cancelled', 'no_show', 'disputed'));
 ```
 
-Trigger-based alternative (when exclusion constraints aren't suitable):
-
-```sql
-CREATE OR REPLACE FUNCTION prevent_booking_conflict()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM bookings
-    WHERE provider_id = NEW.provider_id
-      AND status NOT IN ('cancelled', 'rejected')
-      AND id != COALESCE(NEW.id, '00000000-0000-0000-0000-000000000000'::uuid)
-      AND tstzrange(starts_at, ends_at, '[)') && tstzrange(NEW.starts_at, NEW.ends_at, '[)')
-  ) THEN
-    RAISE EXCEPTION 'Booking conflict: provider already has a booking in this time slot'
-      USING ERRCODE = 'exclusion_violation';
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER check_booking_conflict
-  BEFORE INSERT OR UPDATE ON bookings
-  FOR EACH ROW EXECUTE FUNCTION prevent_booking_conflict();
-```
+> **Note**: For equipment/vehicle rental (day-range bookings) use the `daterange` EXCLUDE pattern in the Equipment/Vehicle Rental section instead. For fitness class capacity use the `FOR UPDATE` atomic enrollment pattern in the Class Session section.
 
 ---
 
@@ -521,7 +500,7 @@ CREATE INDEX idx_bookings_customer      ON bookings (customer_id, created_at DES
 CREATE INDEX idx_bookings_branch_status ON bookings (branch_id, status, starts_at);
 CREATE INDEX idx_bookings_held          ON bookings (held_until) WHERE status = 'held';
 
-SELECT update_updated_at('bookings');
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON bookings FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- Release expired held slots every minute
 SELECT cron.schedule('release-held-slots', '* * * * *', $$
@@ -554,16 +533,17 @@ CREATE TABLE loyalty_accounts (
 );
 
 CREATE TABLE loyalty_transactions (
-  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id      uuid NOT NULL REFERENCES tenants(id),
-  account_id     uuid NOT NULL REFERENCES loyalty_accounts(id),
-  booking_id     uuid REFERENCES bookings(id),
-  event_type     loyalty_event_type NOT NULL,
-  points_delta   integer NOT NULL,            -- positive = earned, negative = redeemed
-  balance_after  integer NOT NULL,
-  expires_at     timestamptz,                 -- null = no expiry
-  description    text NOT NULL,
-  created_at     timestamptz NOT NULL DEFAULT now()
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id        uuid NOT NULL REFERENCES tenants(id),
+  account_id       uuid NOT NULL REFERENCES loyalty_accounts(id),
+  booking_id       uuid REFERENCES bookings(id),
+  event_type       loyalty_event_type NOT NULL,
+  points_delta     integer NOT NULL,            -- positive = earned, negative = redeemed
+  balance_after    integer NOT NULL,
+  expires_at       timestamptz,                 -- null = no expiry
+  description      text NOT NULL,
+  idempotency_key  text UNIQUE,                 -- prevents duplicate credits on retry
+  created_at       timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE memberships (
@@ -580,7 +560,8 @@ CREATE TABLE memberships (
   sessions_used    integer NOT NULL DEFAULT 0,
   amount_per_cycle integer NOT NULL,
   currency         text NOT NULL DEFAULT 'NGN',
-  payment_ref      text,
+  payment_ref      text,                        -- generic payment reference
+  paystack_sub_code text,                       -- Paystack subscription code (if Paystack Recurring used)
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
@@ -589,8 +570,8 @@ CREATE INDEX idx_loyalty_customer ON loyalty_accounts (tenant_id, customer_id);
 CREATE INDEX idx_loyalty_txn      ON loyalty_transactions (account_id, created_at DESC);
 CREATE INDEX idx_memberships_renew ON memberships (renews_at) WHERE status = 'active';
 
-SELECT update_updated_at('loyalty_accounts');
-SELECT update_updated_at('memberships');
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON loyalty_accounts FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON memberships    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 ```
 
 ---
@@ -758,7 +739,7 @@ CREATE INDEX idx_momo_provider_ref     ON mobile_money_transactions (provider_re
 CREATE INDEX idx_momo_idempotency      ON mobile_money_transactions (idempotency_key);
 CREATE INDEX idx_momo_checkout_req     ON mobile_money_transactions (checkout_req_id) WHERE checkout_req_id IS NOT NULL;
 
-SELECT update_updated_at('mobile_money_transactions');
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON mobile_money_transactions FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 ```
 
 ---
@@ -786,7 +767,7 @@ CREATE TABLE ussd_sessions (
 CREATE UNIQUE INDEX idx_ussd_session_id ON ussd_sessions (session_id);
 CREATE INDEX idx_ussd_phone_recent     ON ussd_sessions (phone, created_at DESC);
 
-SELECT update_updated_at('ussd_sessions');
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON ussd_sessions FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- Sessions expire in 3 minutes (Africa's Talking default); clean up daily
 SELECT cron.schedule('cleanup-ussd-sessions', '30 3 * * *', $$
@@ -888,7 +869,7 @@ Real-time position stream for dispatch, home services, and logistics verticals. 
 CREATE TABLE gps_pings (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   booking_id    uuid NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-  tenant_id     uuid NOT NULL REFERENCES businesses(id),
+  tenant_id     uuid NOT NULL REFERENCES tenants(id),
   provider_id   uuid NOT NULL REFERENCES staff(id),
   location      geography(POINT, 4326) NOT NULL,
   recorded_at   timestamptz NOT NULL DEFAULT now(),
@@ -961,7 +942,7 @@ CREATE TYPE photo_type AS ENUM ('before', 'after', 'damage', 'completion', 'id_v
 CREATE TABLE job_photos (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   booking_id    uuid NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-  tenant_id     uuid NOT NULL REFERENCES businesses(id),
+  tenant_id     uuid NOT NULL REFERENCES tenants(id),
   uploaded_by   uuid NOT NULL REFERENCES users(id),
   photo_type    photo_type NOT NULL,
   storage_path  text NOT NULL,   -- path in private 'job-evidence' bucket, e.g. "{tenant_id}/{booking_id}/before-001.jpg"
@@ -1020,7 +1001,7 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 -- equipment table (or vehicles — same pattern)
 CREATE TABLE equipment (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       uuid NOT NULL REFERENCES businesses(id),
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
   branch_id       uuid REFERENCES branches(id),
   name            text NOT NULL,
   category        text NOT NULL,
@@ -1033,7 +1014,7 @@ CREATE TABLE equipment (
 -- rental_bookings — date-range conflict prevention
 CREATE TABLE rental_bookings (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id            uuid NOT NULL REFERENCES businesses(id),
+  tenant_id            uuid NOT NULL REFERENCES tenants(id),
   equipment_id         uuid NOT NULL REFERENCES equipment(id),
   customer_id          uuid NOT NULL REFERENCES users(id),
   rental_period        daterange NOT NULL,          -- e.g. '[2026-08-01,2026-08-05)'
@@ -1051,7 +1032,7 @@ CREATE TABLE rental_bookings (
     EXCLUDE USING gist (
       equipment_id WITH =,
       rental_period WITH &&
-    ) WHERE (status NOT IN ('cancelled', 'no_show'))
+    ) WHERE (status NOT IN ('cancelled', 'no_show', 'disputed'))
 );
 
 ALTER TABLE rental_bookings ENABLE ROW LEVEL SECURITY;
@@ -1084,7 +1065,7 @@ Fitness/gym class booking uses a FOR UPDATE lock to atomically check and decreme
 -- class_sessions table
 CREATE TABLE class_sessions (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       uuid NOT NULL REFERENCES businesses(id),
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
   branch_id       uuid NOT NULL REFERENCES branches(id),
   instructor_id   uuid NOT NULL REFERENCES staff(id),
   service_id      uuid NOT NULL REFERENCES services(id),  -- e.g. "Yoga", "HIIT"
@@ -1103,7 +1084,7 @@ CREATE TABLE class_enrollments (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id      uuid NOT NULL REFERENCES class_sessions(id),
   customer_id     uuid NOT NULL REFERENCES users(id),
-  tenant_id       uuid NOT NULL REFERENCES businesses(id),
+  tenant_id       uuid NOT NULL REFERENCES tenants(id),
   status          text NOT NULL DEFAULT 'confirmed' CHECK (status IN ('confirmed','waitlisted','cancelled','attended','no_show')),
   enrolled_at     timestamptz NOT NULL DEFAULT now(),
   cancelled_at    timestamptz,
