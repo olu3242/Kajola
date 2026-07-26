@@ -1,0 +1,4 @@
+-- No schema changes in this PR.
+-- packages/db/src/index.ts: TypeScript type exports only (mirrors existing schema).
+-- supabase/functions/auth/index.ts: replaced stub OTP delivery with Termii API call.
+-- supabase/functions/sms-notify/index.ts: new Edge Function — no new tables required.

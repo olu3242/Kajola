@@ -1,8 +1,10 @@
-# Kajola — Production Platform Architect Skill
+# Kajola — Africa's Service Commerce & Appointment Operating System
 
 > One prompt. Full system architecture. Zero placeholders.
 
-**Kajola** is a Claude skill that generates complete, production-ready system architecture packages for multi-tenant platforms — with African market patterns baked in by default. It also ships as a monorepo scaffold you can build on directly.
+**Kajola** is a Claude skill that generates complete, production-ready architecture packages for **service commerce and appointment platforms** — Africa's intelligent booking, business management, and service commerce layer. It also ships as a Turborepo monorepo scaffold you can build on directly.
+
+Built around the **Service Operations Reliability Framework (SORF)** — an 18-stage booking lifecycle from discovery to repeat booking — Kajola generates platforms that handle multi-staff scheduling, deposit flows, no-show policy, waitlists, loyalty programs, franchise management, and AI-powered operations out of the box. African market patterns (Paystack, M-Pesa, MTN MoMo, Orange Money, USSD, bilingual SMS) are baked in by default.
 
 ---
 
@@ -26,16 +28,48 @@ When you describe your platform, Kajola outputs all 11 sections:
 
 ---
 
+## Service Operations Reliability Framework (SORF)
+
+Kajola's core innovation is the **SORF** — a structured 18-stage lifecycle that every generated platform implements end-to-end:
+
+| Stage | Name | Description |
+|-------|------|-------------|
+| 1 | Discovery | Customer finds provider via search, map, or referral |
+| 2 | Evaluation | Views profile, reviews, pricing, availability |
+| 3 | Selection | Chooses service, staff member, and time slot |
+| 4 | Slot Hold | System reserves slot (15-min optimistic hold) |
+| 5 | Deposit | Partial or full payment via Paystack / M-Pesa / MoMo |
+| 6 | Confirmation | Booking confirmed; SMS + push sent to both parties |
+| 7 | Reminder | 24h and 2h pre-appointment reminders dispatched |
+| 8 | Check-In | Customer arrives; staff marks checked-in |
+| 9 | Service Delivery | Active service; SLA clock running |
+| 10 | Completion | Staff marks complete; rating prompt triggered |
+| 11 | Payment Settlement | Provider wallet credited; payout queued |
+| 12 | Review & Rating | Customer rates; provider rating recalculated |
+| 13 | Loyalty Credit | Points or stamps credited to customer account |
+| 14 | Re-booking Nudge | AI suggests next appointment at optimal interval |
+| 15 | No-Show Handling | Policy applied (block / require prepayment) |
+| 16 | Dispute Resolution | Payout frozen; manager reviews; resolves |
+| 17 | Waitlist Notification | Cancelled slot offered to next waitlisted customer |
+| 18 | Repeat Booking | Customer re-books from notification or profile |
+
+Every generated SQL schema, API, and automation engine is anchored to these stages.
+
+---
+
 ## Africa-First Defaults
 
 Kajola automatically applies these patterns for any platform:
 
-- **Payments**: Paystack (Nigeria) + Flutterwave (Pan-African) + M-Pesa (East Africa) + Cash tracking
-- **Auth**: Phone OTP primary, WhatsApp OTP fallback — no email dependency
-- **Notifications**: SMS-primary via Termii/Twilio
+- **Payments**: Paystack (Nigeria) · Flutterwave (Pan-African) · M-Pesa Daraja C2B+B2C (Kenya/East Africa) · MTN Mobile Money (Ghana) · Orange Money (Côte d'Ivoire/Senegal) · Cash tracking
+- **Auth**: Phone OTP primary via Termii (West Africa) or Africa's Talking (East Africa) · WhatsApp OTP fallback — no email dependency
+- **Notifications**: SMS-primary · USSD fallback for feature-phone users (Africa's Talking USSD gateway) · Bilingual SMS templates for multi-country platforms
 - **Mobile**: Android-first, large touch targets, skeleton screens
-- **Connectivity**: Offline action queue + sync, lazy loading, low-data mode option
+- **Connectivity**: Offline action queue + sync (expo-sqlite backed), lazy loading, low-data mode option
 - **Multi-tenant**: RLS on every table, `current_user_tenant_id()` helper, super admin bypass
+- **Booking Engine**: Staff availability windows, SORF 9-state booking_status, optimistic slot hold, deposit policy, waitlist, no-show policy — all enforced at DB level
+- **Franchise & Enterprise**: Business → Branch → Staff hierarchy, franchise owner dashboards, materialised KPI views refreshed every 15 min
+- **AI Operations**: No-show prediction, smart scheduling nudges, demand forecasting (Section 7 + Section 10)
 
 ---
 
@@ -88,16 +122,37 @@ Paystack payments. Full package.
 
 ```
 kajola/
-├── SKILL.md                        # Main skill instructions (549 lines)
+├── SKILL.md                        # Main skill instructions
 ├── references/
-│   ├── sql-patterns.md             # Reusable SQL: triggers, RLS, PostGIS, slot gen
-│   └── output-template.md          # Structured output template for all 11 sections
+│   ├── sql-patterns.md             # Reusable SQL: triggers, RLS, PostGIS, MoMo, USSD
+│   ├── output-template.md          # Structured output template for all 11 sections
+│   └── api-patterns.md             # Edge Function patterns: HMAC, M-Pesa, AT SMS, offline queue
 ├── evals/
-│   └── evals.json                  # 6 test cases, 45 assertions
+│   └── evals.json                  # 28 test cases, 303 assertions
+├── supabase/
+│   ├── migrations/                 # Reference migrations (SORF baseline schema)
+│   └── functions/
+│       ├── book-slot/index.ts      # SORF hold-state Edge Function reference implementation
+│       └── confirm-payment/index.ts  # SORF Paystack webhook (HMAC → held→confirmed + loyalty)
+├── scripts/
+│   ├── check-example.sh            # SORF compliance validator for individual example files (50 checks)
+│   ├── run-evals.sh                # Eval runner: print prompts + assertions for manual testing
+│   └── validate-skill.sh           # Full skill structure validator (115 checks)
 └── examples/
     ├── README.md                   # Examples index
-    ├── kajola-artisan-platform.md  # Full output: artisan booking marketplace (Nigeria)
-    └── toolhire-pro-nigeria.md     # Full output: equipment rental marketplace (Nigeria)
+    ├── kajola-artisan-platform.md  # Artisan booking marketplace — Nigeria (Paystack + Termii)
+    ├── toolhire-pro-nigeria.md     # Equipment rental marketplace — Nigeria (Paystack)
+    ├── boda-connect-kenya.md       # Boda-boda dispatch — Kenya (M-Pesa + Africa's Talking + USSD)
+    ├── parcelrun-ghana-ci.md       # Micro-logistics — Ghana + Côte d'Ivoire (MTN + Orange Money, bilingual)
+    ├── glamplus-beauty-kenya.md    # Beauty salon chain — Kenya (M-Pesa deposit + SORF + loyalty + waitlist)
+    ├── medconnect-telemedicine-nigeria.md  # Telemedicine platform — Nigeria (Paystack + Termii + Whereby)
+    ├── fitbook-gym-nigeria.md      # Gym + fitness class booking — Nigeria (Paystack Recurring + QR check-in)
+    ├── homepro-nigeria.md          # Home services — Nigeria (GPS dispatch + photo evidence + background checks)
+    ├── sparkwash-nigeria-ghana.md  # Car wash chain — Nigeria + Ghana (Paystack + MTN MoMo + Recurring memberships)
+    ├── cutculture-barbershop-nigeria.md  # Barbershop franchise — Nigeria (Paystack + Termii + 5-stamp loyalty + franchise royalty)
+    ├── cleanrun-laundry-nigeria.md       # Laundry pickup & delivery — Nigeria (GPS dispatch + job photos + weight-based pricing)
+    ├── pawperfect-pet-nigeria.md         # Pet grooming & vet clinic — Nigeria (vaccine records + health notes + per-pet booking)
+    └── doclink-telemedicine-ghana.md     # Multi-specialty telemedicine — Ghana (MTN MoMo + Africa's Talking + Whereby + USSD)
 ```
 
 ---
@@ -155,8 +210,9 @@ npm run dev
 | API Logic | Supabase Edge Functions (Deno) |
 | Styling | Tailwind CSS + shadcn/ui |
 | Monorepo | Turborepo |
-| Payments | Paystack (MVP) + Flutterwave + M-Pesa |
-| SMS | Termii (primary) / Twilio (fallback) |
+| Payments | Paystack · Flutterwave · M-Pesa Daraja · MTN MoMo · Orange Money |
+| SMS | Termii (West Africa) · Africa's Talking (East Africa) · Twilio (fallback) |
+| USSD | Africa's Talking USSD gateway (feature-phone markets) |
 
 Override any of these by specifying your preferred stack in the prompt.
 
@@ -169,7 +225,13 @@ Kajola enforces a zero-placeholder quality bar:
 - ✅ Every SQL table has named indexes, explicit FK constraints, and RLS policies
 - ✅ Every API endpoint has auth requirement, request schema, response schema, and error cases
 - ✅ Every env var is listed with its description and source
-- ✅ Booking conflict prevention is enforced at DB level (`EXCLUDE USING gist`), not application level
+- ✅ Booking conflict prevention is enforced at DB level (`EXCLUDE USING gist` on staff_id + branch_id), not application level
+- ✅ All 9 SORF booking states (`pending` → `confirmed` → `held` → `checked_in` → `in_progress` → `completed` | `cancelled` | `no_show` | `disputed`) are present in every booking schema
+- ✅ Staff availability uses `availability_windows` (recurring) + `availability_overrides` (one-off)
+- ✅ Deposit policy, cancellation policy, and no-show policy are stored as jsonb on the `businesses` table
+- ✅ Waitlist trigger fires on every booking cancellation or no-show
+- ✅ Franchise/multi-branch platforms include `branch_kpis` materialised view
+- ✅ AI Operations section covers no-show prediction and smart scheduling in Sections 7 and 10
 - ✅ Automation runs are idempotent — no duplicate processing
 - ✅ Section 9 monetization contains real numbers, not `X%` or `TBD`
 

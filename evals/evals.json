@@ -1,6 +1,6 @@
 {
   "skill": "production-platform-architect",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "description": "Evaluation cases for the Kajola skill. Each case defines a prompt, required sections, and specific assertions that must hold in the generated output.",
   "cases": [
     {
@@ -281,11 +281,1477 @@
           "check": "Section 9 contains at least one specific Naira amount (₦) or percentage with a digit"
         }
       ]
+    },
+    {
+      "id": "eval-007",
+      "name": "Ride-hailing dispatch with M-Pesa and USSD (Kenya)",
+      "prompt": "Design a boda-boda (motorcycle taxi) dispatch platform for Nairobi, Kenya. Riders join Saccos, passengers book and pay via M-Pesa STK Push, fares are settled via M-Pesa B2C payout. Feature-phone riders need a USSD fallback for earnings checks. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a007-01",
+          "description": "M-Pesa STK Push used for passenger payments",
+          "check": "output contains 'STK Push' or 'STK' or 'Daraja' in Sections 3, 4, or 8"
+        },
+        {
+          "id": "a007-02",
+          "description": "M-Pesa B2C used for rider payouts",
+          "check": "output contains 'B2C' or 'BusinessPayment' or 'payout' in Sections 3 or 4"
+        },
+        {
+          "id": "a007-03",
+          "description": "KES currency used throughout",
+          "check": "output contains 'KES' or 'Kenya shilling' in Sections 2, 3, or 9"
+        },
+        {
+          "id": "a007-04",
+          "description": "USSD fallback for feature-phone riders",
+          "check": "output contains 'USSD' in Sections 3, 4, or 5"
+        },
+        {
+          "id": "a007-05",
+          "description": "Rider and passenger as distinct personas",
+          "check": "Section 1 contains at least two distinct personas (rider and passenger)"
+        },
+        {
+          "id": "a007-06",
+          "description": "PostGIS nearest-rider query present",
+          "check": "Section 3 contains geography or PostGIS or ST_DWithin for rider location"
+        },
+        {
+          "id": "a007-07",
+          "description": "Africa's Talking or Termii for SMS fallback",
+          "check": "output contains 'Africa\\'s Talking' or 'Termii' in Sections 3 or 8"
+        },
+        {
+          "id": "a007-08",
+          "description": "Sacco/tenant multi-tenancy modelled",
+          "check": "Section 3 contains tenant_id and RLS policies"
+        },
+        {
+          "id": "a007-09",
+          "description": "Offline GPS queue addressed",
+          "check": "output contains 'offline' or 'queue' or 'cache' in Sections 5 or 6"
+        },
+        {
+          "id": "a007-10",
+          "description": "Daraja HMAC callback verification",
+          "check": "Section 4 or Section 8 contains HMAC or signature verification for M-Pesa callbacks"
+        },
+        {
+          "id": "a007-11",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a007-12",
+          "description": "Assumptions block present with Kenya-specific notes",
+          "check": "output contains '## Assumptions Made' and mentions Daraja or Safaricom or CBK"
+        }
+      ]
+    },
+    {
+      "id": "eval-008",
+      "name": "Bilingual and offline-first compliance (West Africa)",
+      "prompt": "Design a micro-logistics platform for Accra, Ghana and Abidjan, Côte d'Ivoire. Small parcels booked by phone, delivered by independent couriers. Bilingual UI (English + French). Orange Money payments for Côte d'Ivoire, MTN Mobile Money for Ghana. Couriers often lose connectivity during deliveries.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a008-01",
+          "description": "Orange Money or MTN Mobile Money referenced",
+          "check": "output contains 'Orange Money' or 'MTN Mobile Money' or 'MTN MoMo' in Sections 3 or 4"
+        },
+        {
+          "id": "a008-02",
+          "description": "Multi-currency: GHS and XOF both addressed",
+          "check": "output contains 'GHS' and ('XOF' or 'CFA' or 'franc')"
+        },
+        {
+          "id": "a008-03",
+          "description": "Bilingual (English + French) UX mentioned",
+          "check": "output contains 'French' or 'fr-' or 'bilingual' or 'i18n' in Sections 1, 5, or 8"
+        },
+        {
+          "id": "a008-04",
+          "description": "Offline-first pattern for couriers",
+          "check": "output contains 'offline' or 'SQLite' or 'queue' or 'sync' in Sections 5, 6, or 9"
+        },
+        {
+          "id": "a008-05",
+          "description": "Parcel tracking states in schema",
+          "check": "Section 3 contains parcel or shipment status states (e.g. picked_up, in_transit, delivered)"
+        },
+        {
+          "id": "a008-06",
+          "description": "Sender and courier as distinct personas",
+          "check": "Section 1 contains at least two personas: one who sends parcels and one who delivers"
+        },
+        {
+          "id": "a008-07",
+          "description": "RLS and tenant isolation present",
+          "check": "Section 3 contains 'ROW LEVEL SECURITY' and 'tenant_id'"
+        },
+        {
+          "id": "a008-08",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a008-09",
+          "description": "Phone OTP remains primary auth",
+          "check": "Section 5 specifies phone OTP as the authentication method"
+        },
+        {
+          "id": "a008-10",
+          "description": "Assumptions block notes multi-country scope",
+          "check": "output contains '## Assumptions Made' and mentions Ghana and Côte d'Ivoire or Abidjan"
+        }
+      ]
+    },
+    {
+      "id": "eval-009",
+      "name": "Multi-staff beauty salon with SORF lifecycle and loyalty (Kenya)",
+      "prompt": "Design a multi-tenant beauty salon booking platform for Nairobi, Kenya called GlamPlus. Customers book appointments with specific stylists, pay a 30% M-Pesa deposit to confirm, earn loyalty points, and join a waitlist if their preferred stylist is fully booked. Salon owners manage multiple branches and see real-time KPI dashboards. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a009-01",
+          "description": "SORF 9-state booking_status enum present",
+          "check": "Section 3 contains booking_status enum with at least: pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a009-02",
+          "description": "Staff availability using availability_windows table",
+          "check": "Section 3 contains 'availability_windows' with day_of_week and start_time and end_time"
+        },
+        {
+          "id": "a009-03",
+          "description": "Booking conflict exclusion constraint scoped to staff and branch",
+          "check": "Section 3 contains 'EXCLUDE USING gist' with staff_id and branch_id"
+        },
+        {
+          "id": "a009-04",
+          "description": "Deposit policy as jsonb on businesses table",
+          "check": "Section 3 contains 'deposit_policy' in businesses or tenants table as jsonb"
+        },
+        {
+          "id": "a009-05",
+          "description": "Waitlist with cancellation trigger",
+          "check": "Section 3 or Section 7 contains 'waitlist' and a trigger or automation event for cancellation"
+        },
+        {
+          "id": "a009-06",
+          "description": "Loyalty accounts and transactions present",
+          "check": "Section 3 contains 'loyalty_accounts' or 'loyalty_transactions' or 'loyalty_points'"
+        },
+        {
+          "id": "a009-07",
+          "description": "M-Pesa STK Push used for deposit collection",
+          "check": "Section 3 or Section 4 contains 'STK Push' or 'Daraja' or 'M-Pesa' for deposit payment"
+        },
+        {
+          "id": "a009-08",
+          "description": "Branch KPI dashboard or materialised view present",
+          "check": "Section 3 or Section 7 contains 'branch_kpis' or 'kpi' or 'materialised view' or 'materialized view'"
+        },
+        {
+          "id": "a009-09",
+          "description": "No-show policy tracked and enforced",
+          "check": "Section 3 contains 'no_show' as a booking state and Section 7 or Section 3 references no-show policy or penalty"
+        },
+        {
+          "id": "a009-10",
+          "description": "Optimistic slot hold with expiry",
+          "check": "Section 3 contains 'held_until' or 'hold' and a pg_cron or automation job to release expired holds"
+        },
+        {
+          "id": "a009-11",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a009-12",
+          "description": "Assumptions block mentions Kenya and M-Pesa",
+          "check": "output contains '## Assumptions Made' and mentions Kenya or KES and M-Pesa or Daraja"
+        }
+      ]
+    },
+    {
+      "id": "eval-010",
+      "name": "Multi-branch health clinic with franchise management and SORF (Nigeria)",
+      "prompt": "Design a multi-branch health clinic appointment platform for Nigeria called MedBook. Patients book appointments at any HealthFirst clinic branch, pay a ₦5,000 deposit via Paystack to confirm, and receive SMS reminders. Doctors manage their own availability. The clinic group owner sees cross-branch analytics. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a010-01",
+          "description": "Branch hierarchy: businesses, branches, staff (doctors)",
+          "check": "Section 3 contains 'businesses' and 'branches' and 'staff' tables reflecting the multi-branch structure"
+        },
+        {
+          "id": "a010-02",
+          "description": "SORF booking states including checked_in and in_progress",
+          "check": "Section 3 contains booking_status with 'checked_in' and 'in_progress' as distinct states"
+        },
+        {
+          "id": "a010-03",
+          "description": "Doctor availability managed via availability_windows",
+          "check": "Section 3 contains 'availability_windows' for doctor/staff scheduling"
+        },
+        {
+          "id": "a010-04",
+          "description": "Paystack deposit with idempotency key",
+          "check": "Section 3 or Section 4 contains 'Paystack' and 'idempotency' or 'idempotency_key' for deposit flow"
+        },
+        {
+          "id": "a010-05",
+          "description": "Franchise owner cross-branch view or materialised view",
+          "check": "Section 3 or Section 5 contains 'franchise' or 'cross-branch' or 'branch_kpis' or 'aggregate' dashboard"
+        },
+        {
+          "id": "a010-06",
+          "description": "No-show policy enforced",
+          "check": "Section 3 or Section 7 contains 'no_show' handling with policy enforcement (deposit forfeiture or prepayment requirement)"
+        },
+        {
+          "id": "a010-07",
+          "description": "All API endpoints have auth requirements documented",
+          "check": "Section 4 documents auth requirement for every endpoint (Bearer JWT or none for public endpoints)"
+        },
+        {
+          "id": "a010-08",
+          "description": "SMS reminder automation in Section 7",
+          "check": "Section 7 contains a cron job or automation event for appointment reminders (24h or 2h before)"
+        },
+        {
+          "id": "a010-09",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a010-10",
+          "description": "Monetization includes actual Naira figures",
+          "check": "Section 9 contains at least one specific Naira amount (₦) for deposit, subscription, or commission"
+        }
+      ]
+    },
+    {
+      "id": "eval-011",
+      "name": "Home services marketplace with SORF job lifecycle (Nigeria)",
+      "prompt": "Design a multi-tenant home services marketplace for Nigeria called FixIt. Customers book verified plumbers, electricians, and AC technicians. The provider arrives, assesses the job, collects a ₦3,000 call-out deposit via Paystack, does the work, and the customer pays the balance on completion. Providers set their own weekly availability. Customer no-shows trigger a prepayment requirement. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a011-01",
+          "description": "SORF booking states including checked_in and in_progress",
+          "check": "Section 3 contains 'checked_in' and 'in_progress' as distinct booking states"
+        },
+        {
+          "id": "a011-02",
+          "description": "availability_windows table for provider scheduling",
+          "check": "Section 3 contains 'availability_windows' with day_of_week and start_time"
+        },
+        {
+          "id": "a011-03",
+          "description": "EXCLUDE USING gist constraint for slot conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for booking conflict prevention"
+        },
+        {
+          "id": "a011-04",
+          "description": "Paystack used for call-out deposit",
+          "check": "Section 3 or Section 4 contains 'Paystack' for deposit payment flow"
+        },
+        {
+          "id": "a011-05",
+          "description": "NGN amounts in Section 9 (no placeholder rates)",
+          "check": "Section 9 contains at least one specific Naira amount (₦) for fees, subscriptions, or commissions"
+        },
+        {
+          "id": "a011-06",
+          "description": "No-show policy with prepayment requirement",
+          "check": "Section 3 or Section 7 contains no_show_policy or 'require_prepayment' or 'prepayment'"
+        },
+        {
+          "id": "a011-07",
+          "description": "Deposit policy stored as jsonb on businesses",
+          "check": "Section 3 contains 'deposit_policy' as jsonb on businesses or tenants table"
+        },
+        {
+          "id": "a011-08",
+          "description": "Customer and provider as distinct personas",
+          "check": "Section 1 contains at least two personas: one who books and one who provides the service"
+        },
+        {
+          "id": "a011-09",
+          "description": "Webhook HMAC verification for Paystack",
+          "check": "Section 7 or Section 4 contains 'HMAC' or 'x-paystack-signature' for webhook verification"
+        },
+        {
+          "id": "a011-10",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a011-11",
+          "description": "Idempotency key on payment initiation",
+          "check": "Section 3 or Section 4 or Section 7 contains 'idempotency' or 'idempotency_key'"
+        },
+        {
+          "id": "a011-12",
+          "description": "Assumptions block present",
+          "check": "output contains '## Assumptions Made' and mentions Nigeria or NGN or Paystack"
+        }
+      ]
+    },
+    {
+      "id": "eval-012",
+      "name": "Multi-branch healthcare clinic with USSD fallback (East Africa)",
+      "prompt": "Design a multi-branch hospital appointment platform called MediCare Connect for East Africa (Kenya, Uganda, Tanzania). Patients book doctor appointments, pay a KES 500 / UGX 20,000 / TZS 10,000 consultation deposit via M-Pesa (Kenya), MTN Mobile Money (Uganda), or M-Pesa Tanzania. Rural patients with feature phones use USSD to check appointment status. Doctors manage their own schedules. Hospital group owners see cross-branch analytics. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a012-01",
+          "description": "Multi-currency: KES, UGX, TZS addressed",
+          "check": "output contains 'KES' and ('UGX' or 'Uganda') and ('TZS' or 'Tanzania')"
+        },
+        {
+          "id": "a012-02",
+          "description": "M-Pesa used for Kenya and Tanzania; MTN MoMo for Uganda",
+          "check": "output contains 'M-Pesa' and ('MTN' or 'Mobile Money') in Sections 2, 3, or 8"
+        },
+        {
+          "id": "a012-03",
+          "description": "USSD fallback for rural feature-phone patients",
+          "check": "output contains 'USSD' in Sections 3, 4, or 5"
+        },
+        {
+          "id": "a012-04",
+          "description": "Africa's Talking used for SMS or USSD delivery",
+          "check": "output contains 'Africa\\'s Talking' or 'africastalking' in Sections 2 or 8"
+        },
+        {
+          "id": "a012-05",
+          "description": "SORF booking states in schema including checked_in",
+          "check": "Section 3 contains 'checked_in' as a booking status"
+        },
+        {
+          "id": "a012-06",
+          "description": "Doctor availability via availability_windows",
+          "check": "Section 3 contains 'availability_windows' for doctor or staff scheduling"
+        },
+        {
+          "id": "a012-07",
+          "description": "Cross-branch analytics or franchise/multi-branch view",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' or 'cross-branch' or 'franchise' or 'aggregate' analytics"
+        },
+        {
+          "id": "a012-08",
+          "description": "RLS and tenant isolation present",
+          "check": "Section 3 contains 'ROW LEVEL SECURITY' and 'tenant_id'"
+        },
+        {
+          "id": "a012-09",
+          "description": "No-show policy and tracking present",
+          "check": "Section 3 or Section 7 contains 'no_show' handling"
+        },
+        {
+          "id": "a012-10",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a012-11",
+          "description": "Idempotency on payment webhooks",
+          "check": "Section 3 or Section 4 or Section 7 contains 'idempotency_key' or 'idempotent'"
+        },
+        {
+          "id": "a012-12",
+          "description": "Assumptions block with multi-country scope",
+          "check": "output contains '## Assumptions Made' and mentions Kenya and ('Uganda' or 'Tanzania')"
+        }
+      ]
+    },
+    {
+      "id": "eval-013",
+      "name": "Telemedicine and in-clinic appointment platform (Nigeria)",
+      "prompt": "Design a telemedicine and in-clinic appointment booking platform for Nigeria called MedConnect. Patients book video consultations or in-person visits with licensed GPs, dermatologists, cardiologists, and pediatricians. Doctors set their own weekly availability windows. Patients pay a consultation deposit via Paystack before the slot is confirmed. VIP wellness members earn wellness points per consultation. No-show policy applies after 3 missed appointments. Multi-specialty clinic groups manage multiple branches and doctors under one account. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a013-01",
+          "description": "SORF 9-state booking lifecycle including held and checked_in",
+          "check": "Section 3 contains 'held' and 'checked_in' as distinct booking_status enum values"
+        },
+        {
+          "id": "a013-02",
+          "description": "availability_windows table for doctor scheduling",
+          "check": "Section 3 contains 'availability_windows' with day_of_week and start_time columns"
+        },
+        {
+          "id": "a013-03",
+          "description": "EXCLUDE USING gist for doctor slot conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist' scoped to staff_id or doctor_id for booking conflict prevention"
+        },
+        {
+          "id": "a013-04",
+          "description": "Paystack deposit collected before booking is confirmed",
+          "check": "Section 3 or Section 4 describes Paystack deposit flow with booking 'held' → 'confirmed' on payment"
+        },
+        {
+          "id": "a013-05",
+          "description": "Video consultation infrastructure mentioned",
+          "check": "Section 2 or Section 3 or Section 4 mentions video consultation room (Whereby or equivalent)"
+        },
+        {
+          "id": "a013-06",
+          "description": "No-show policy with prepayment requirement after 3 missed appointments",
+          "check": "Section 3 or Section 7 contains no_show_policy or require_prepayment with a count threshold"
+        },
+        {
+          "id": "a013-07",
+          "description": "Wellness loyalty points system present",
+          "check": "Section 3 contains 'loyalty_accounts' or 'loyalty_transactions' or 'wellness points'"
+        },
+        {
+          "id": "a013-08",
+          "description": "Deposit policy stored as jsonb on businesses table",
+          "check": "Section 3 contains 'deposit_policy' as jsonb on businesses or tenant table"
+        },
+        {
+          "id": "a013-09",
+          "description": "Webhook HMAC verification for Paystack",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a013-10",
+          "description": "branch_kpis materialised view for multi-branch clinic analytics",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a013-11",
+          "description": "No placeholder text in output",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a013-12",
+          "description": "Assumptions block present with Nigeria / NGN / Paystack context",
+          "check": "output contains '## Assumptions Made' and mentions Nigeria or NGN or Paystack"
+        }
+      ]
+    },
+    {
+      "id": "eval-014",
+      "name": "Wellness spa franchise with USSD fallback (Francophone West Africa)",
+      "prompt": "Design a wellness spa and beauty salon franchise platform called BellaSpa for Côte d'Ivoire and Senegal. Franchisees operate individual spas under the BellaSpa brand; customers book massages, facials, body treatments, and hair services. Payments via Orange Money (XOF). SMS sent in French. Feature-phone customers use USSD to check appointment status and receive booking confirmations. Franchise owners see consolidated KPI dashboards across all spas. Therapists set their weekly availability. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a014-01",
+          "description": "Orange Money (XOF) as primary payment provider",
+          "check": "Section 2 or Section 3 or Section 8 contains 'Orange Money' and 'XOF'"
+        },
+        {
+          "id": "a014-02",
+          "description": "French-language SMS templates for Côte d'Ivoire and Senegal",
+          "check": "Section 7 or Section 2 mentions French SMS templates or locale 'fr-CI' or 'fr-SN'"
+        },
+        {
+          "id": "a014-03",
+          "description": "USSD handler for feature-phone customers",
+          "check": "Section 3 or Section 4 or Section 5 contains 'USSD' for appointment status or booking flow"
+        },
+        {
+          "id": "a014-04",
+          "description": "Africa's Talking USSD or SMS gateway for Francophone West Africa",
+          "check": "Section 2 or Section 8 mentions Africa's Talking or Orange Money USSD gateway"
+        },
+        {
+          "id": "a014-05",
+          "description": "availability_windows for therapist weekly scheduling",
+          "check": "Section 3 contains 'availability_windows' with day_of_week column for therapist scheduling"
+        },
+        {
+          "id": "a014-06",
+          "description": "SORF booking states present in schema",
+          "check": "Section 3 contains 'booking_status' enum with at least confirmed, cancelled, no_show"
+        },
+        {
+          "id": "a014-07",
+          "description": "branch_kpis or franchise analytics for franchise owner dashboard",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' or franchise analytics view"
+        },
+        {
+          "id": "a014-08",
+          "description": "EXCLUDE USING gist for therapist slot conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for booking conflict prevention"
+        },
+        {
+          "id": "a014-09",
+          "description": "XOF amounts in Section 9 monetization (no placeholder rates)",
+          "check": "Section 9 contains at least one specific XOF amount for fees or subscriptions"
+        },
+        {
+          "id": "a014-10",
+          "description": "No placeholder text in output",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "etc."]
+        },
+        {
+          "id": "a014-11",
+          "description": "deposit_policy jsonb on businesses for franchise deposit configuration",
+          "check": "Section 3 contains 'deposit_policy' as jsonb on businesses or tenants table"
+        },
+        {
+          "id": "a014-12",
+          "description": "Assumptions block with Francophone West Africa context",
+          "check": "output contains '## Assumptions Made' and mentions Côte d'Ivoire or Senegal or XOF"
+        }
+      ]
+    },
+    {
+      "id": "eval-015",
+      "name": "Gym and fitness class booking with memberships (Nigeria)",
+      "prompt": "Design a multi-location gym and fitness class booking platform for Nigeria called FitBook. Members browse and enroll in scheduled group classes (yoga, HIIT, spinning) or book 1:1 personal training sessions. Gym franchises manage multiple locations and trainers. Members subscribe monthly via Paystack recurring billing (unlimited classes) or buy class packs (10 classes, prepaid). QR code check-in at gym gate. No-show without 2-hour notice loses one class credit. Trainers set their own weekly availability. Loyalty FitPoints earned per session. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a015-01",
+          "description": "Class capacity model distinct from 1:1 appointment (enrolled_count + max_capacity)",
+          "check": "Section 3 contains 'enrolled_count' and 'max_capacity' for class sessions"
+        },
+        {
+          "id": "a015-02",
+          "description": "Membership table with recurring billing type",
+          "check": "Section 3 contains 'memberships' table with 'paystack_sub_code' or 'billing_type' or 'recurring'"
+        },
+        {
+          "id": "a015-03",
+          "description": "Class pack / credits system present",
+          "check": "Section 3 or Section 4 contains 'class_pack' or 'credits_remaining' for purchased class packs"
+        },
+        {
+          "id": "a015-04",
+          "description": "EXCLUDE USING gist prevents trainer double-booking for 1:1 PT sessions",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for trainer slot conflict prevention"
+        },
+        {
+          "id": "a015-05",
+          "description": "availability_windows for trainer weekly scheduling",
+          "check": "Section 3 contains 'availability_windows' with day_of_week for trainer scheduling"
+        },
+        {
+          "id": "a015-06",
+          "description": "SORF 9-state booking lifecycle for PT sessions",
+          "check": "Section 3 contains 'booking_status' enum with 'held' and 'checked_in' and 'no_show'"
+        },
+        {
+          "id": "a015-07",
+          "description": "QR code check-in mechanism present",
+          "check": "Section 3 or Section 4 contains 'check_in_code' or 'qr' or 'QR' for member check-in"
+        },
+        {
+          "id": "a015-08",
+          "description": "No-show credit deduction policy (< 2h cancellation)",
+          "check": "Section 3 or Section 7 contains no_show_policy or credit deduction logic for late cancellation"
+        },
+        {
+          "id": "a015-09",
+          "description": "Paystack recurring subscription API used for unlimited membership",
+          "check": "Section 4 or Section 7 or Section 8 contains Paystack 'subscription' or 'recurring' billing"
+        },
+        {
+          "id": "a015-10",
+          "description": "Waitlist for full classes",
+          "check": "Section 3 contains 'waitlist_entries' for full class sessions"
+        },
+        {
+          "id": "a015-11",
+          "description": "NGN amounts in Section 9 (real membership prices)",
+          "check": "Section 9 contains specific NGN amounts (₦) for membership tiers or class pack prices"
+        },
+        {
+          "id": "a015-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-016",
+      "name": "Vehicle rental marketplace (Ghana and Kenya)",
+      "prompt": "Design a multi-country vehicle rental marketplace called DriveEase for Ghana and Kenya. Fleet operators list cars and trucks for daily or weekly rental. Renters browse, book, and pay a 40% deposit via MTN Mobile Money (Ghana) or M-Pesa (Kenya). A security deposit equal to the daily rate is held separately and refunded on clean return. Damaged or late returns trigger a partial deduction. Fleet managers see cross-fleet analytics. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a016-01",
+          "description": "MTN Mobile Money for Ghana (GHS) and M-Pesa for Kenya (KES)",
+          "check": "output contains 'MTN' and ('M-Pesa' or 'Mpesa') in Sections 2, 3, or 8"
+        },
+        {
+          "id": "a016-02",
+          "description": "Day-based conflict prevention using daterange EXCLUDE USING gist",
+          "check": "Section 3 contains 'daterange' or 'EXCLUDE USING gist' for rental date conflict prevention"
+        },
+        {
+          "id": "a016-03",
+          "description": "Two-part payment: rental deposit + security deposit",
+          "check": "Section 3 contains 'security_deposit' or 'deposit_status' or 'deposit_deduction' column"
+        },
+        {
+          "id": "a016-04",
+          "description": "Multi-currency schema supporting both GHS and KES",
+          "check": "Section 3 or Section 8 contains 'GHS' and 'KES' as distinct currency values"
+        },
+        {
+          "id": "a016-05",
+          "description": "Webhook HMAC verification for MTN Mobile Money and M-Pesa callbacks",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-callback-signature' or 'x-mpesa-signature'"
+        },
+        {
+          "id": "a016-06",
+          "description": "Vehicle condition tracking for damage assessment",
+          "check": "Section 3 or Section 4 contains 'condition' or 'damage' or 'inspection' records for vehicles"
+        },
+        {
+          "id": "a016-07",
+          "description": "Fleet analytics or KPI dashboard for fleet managers",
+          "check": "Section 3 or Section 5 contains 'fleet_kpis' or 'branch_kpis' or fleet analytics view"
+        },
+        {
+          "id": "a016-08",
+          "description": "Idempotency guard on payment webhooks",
+          "check": "Section 3 or Section 4 or Section 7 contains 'idempotency_key' or 'idempotent'"
+        },
+        {
+          "id": "a016-09",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns"]
+        },
+        {
+          "id": "a016-10",
+          "description": "GHS and KES real amounts in Section 9",
+          "check": "Section 9 contains at least one specific GHS or KES amount for fees or commissions"
+        },
+        {
+          "id": "a016-11",
+          "description": "Assumptions block with Ghana and Kenya context",
+          "check": "output contains '## Assumptions Made' and mentions Ghana and Kenya"
+        }
+      ]
+    },
+    {
+      "id": "eval-017",
+      "name": "On-demand home services platform (Nigeria)",
+      "prompt": "Design a multi-tenant on-demand home services platform for Nigeria called HomePro. Customers book verified providers for home cleaning, plumbing, electrical repairs, AC servicing, and painting. Providers complete a background check before listing. Customers pay a 30% deposit via Paystack to hold the slot; remaining balance is charged on job completion. Provider GPS location is shared with the customer in real-time from dispatch to arrival. Before and after photo evidence uploaded to Supabase Storage. Loyalty points earned per completed job. Multi-city: Lagos, Abuja, Port Harcourt. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a017-01",
+          "description": "Provider profile includes background check status column",
+          "check": "Section 3 contains 'background_check_status' or 'background_check' on provider profile table"
+        },
+        {
+          "id": "a017-02",
+          "description": "GPS tracking table present (gps_pings or equivalent)",
+          "check": "Section 3 contains 'gps_pings' or 'location_pings' or 'gps_track' for provider tracking"
+        },
+        {
+          "id": "a017-03",
+          "description": "Job photo evidence table with before/after photo types",
+          "check": "Section 3 contains 'job_photos' or 'photo_type' or 'before' and 'after' evidence"
+        },
+        {
+          "id": "a017-04",
+          "description": "EXCLUDE USING gist prevents provider double-booking",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for provider schedule conflict prevention"
+        },
+        {
+          "id": "a017-05",
+          "description": "availability_windows for provider weekly scheduling",
+          "check": "Section 3 contains 'availability_windows' with day_of_week"
+        },
+        {
+          "id": "a017-06",
+          "description": "waitlist_entries for constrained provider availability",
+          "check": "Section 3 contains 'waitlist_entries'"
+        },
+        {
+          "id": "a017-07",
+          "description": "loyalty_accounts for customer points programme",
+          "check": "Section 3 contains 'loyalty_accounts'"
+        },
+        {
+          "id": "a017-08",
+          "description": "30% deposit handled via deposit_policy or explicit deposit amount",
+          "check": "Section 3 or Section 4 contains '30%' or '30 percent' or 'deposit_policy'"
+        },
+        {
+          "id": "a017-09",
+          "description": "Paystack HMAC webhook verification present",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a017-10",
+          "description": "held_until for 15-minute optimistic slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a017-11",
+          "description": "Real NGN service pricing in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) for service fees or platform commission"
+        },
+        {
+          "id": "a017-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-018",
+      "name": "Car wash and auto-detailing chain (Nigeria and Ghana)",
+      "prompt": "Design a multi-tenant car wash and auto-detailing booking platform for Nigeria and Ghana called SparkWash. Customers book express (30-minute) or premium full-detail (3-hour) slots at specific branch locations. Monthly membership passes sold via Paystack Recurring for Nigeria; MTN Mobile Money subscriptions for Ghana. Walk-in queue management runs alongside pre-booked appointments. Loyalty stamp card: 10 washes earn 1 free wash. Branch managers see a live queue dashboard. Multi-currency: NGN (Paystack) for Nigeria, GHS (MTN Mobile Money) for Ghana. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a018-01",
+          "description": "Express and premium service types modelled in schema",
+          "check": "Section 3 contains 'express' or 'premium' or 'service_type' or 'wash_type' distinct service categories"
+        },
+        {
+          "id": "a018-02",
+          "description": "Monthly membership / subscription with recurring billing",
+          "check": "Section 3 or Section 4 contains 'membership' or 'subscription' with 'recurring' or 'paystack_sub_code'"
+        },
+        {
+          "id": "a018-03",
+          "description": "EXCLUDE USING gist for bay or slot conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for booking slot conflict"
+        },
+        {
+          "id": "a018-04",
+          "description": "availability_windows for branch operating hours",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a018-05",
+          "description": "branch_kpis materialised view for live queue dashboard",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a018-06",
+          "description": "loyalty_accounts for stamp card programme",
+          "check": "Section 3 contains 'loyalty_accounts' and 'loyalty_transactions'"
+        },
+        {
+          "id": "a018-07",
+          "description": "MTN Mobile Money present for Ghana",
+          "check": "output contains 'MTN' or 'MoMo' or 'MTN_MNO_API_KEY' for Ghana payments"
+        },
+        {
+          "id": "a018-08",
+          "description": "HMAC webhook verification for payment providers",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature' or 'x-mtn-signature'"
+        },
+        {
+          "id": "a018-09",
+          "description": "held_until for 15-minute optimistic slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a018-10",
+          "description": "Real NGN pricing in Section 9 monetization",
+          "check": "Section 9 contains specific NGN amounts (₦) for service pricing or platform fees"
+        },
+        {
+          "id": "a018-11",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-019",
+      "name": "Construction equipment rental marketplace (Nigeria)",
+      "prompt": "Design a peer-to-peer construction equipment rental marketplace for Nigeria called RigLink. Contractors list heavy equipment (generators, concrete mixers, scaffolding, excavators). Renters book by date range — rental_period stored as a daterange with EXCLUDE USING gist to prevent overlapping rentals on the same piece of equipment. 20% security deposit via Paystack card to hold the booking; balance collected on equipment pickup. Equipment condition logged (photos + notes) before and after each rental. Waitlist when equipment is already booked. Rental owner receives payout on completion. Loyalty for frequent renters: 10 completed rentals earns a featured badge and 5% discount. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a019-01",
+          "description": "daterange EXCLUDE USING gist prevents overlapping rentals on same equipment",
+          "check": "Section 3 contains 'EXCLUDE USING gist' and 'daterange' or 'rental_period' for equipment conflict prevention"
+        },
+        {
+          "id": "a019-02",
+          "description": "rental_period stored as daterange column",
+          "check": "Section 3 contains 'daterange' or 'rental_period' for date-based rental bookings"
+        },
+        {
+          "id": "a019-03",
+          "description": "Condition records (before/after inspection) with photo evidence",
+          "check": "Section 3 or Section 4 contains 'condition' or 'condition_records' or 'inspection' for pre/post rental state"
+        },
+        {
+          "id": "a019-04",
+          "description": "Security deposit or 20% deposit handled at booking time",
+          "check": "Section 3 or Section 4 contains 'deposit' or 'deposit_policy' or 'security_deposit' for 20% hold"
+        },
+        {
+          "id": "a019-05",
+          "description": "Paystack payment integration for NGN",
+          "check": "output contains 'Paystack' as the payment provider for Nigeria"
+        },
+        {
+          "id": "a019-06",
+          "description": "HMAC webhook verification for Paystack",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a019-07",
+          "description": "waitlist_entries for equipment that is already rented",
+          "check": "Section 3 contains 'waitlist_entries' or 'waitlist' for equipment availability"
+        },
+        {
+          "id": "a019-08",
+          "description": "held_until for optimistic rental hold",
+          "check": "Section 3 or Section 4 contains 'held_until' or 'slot hold'"
+        },
+        {
+          "id": "a019-09",
+          "description": "loyalty_accounts for frequent renter programme",
+          "check": "Section 3 contains 'loyalty_accounts' or 'loyalty' for renter incentives"
+        },
+        {
+          "id": "a019-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY in Section 8 env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY'"
+        },
+        {
+          "id": "a019-11",
+          "description": "Real NGN pricing and platform fee in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) for rental fees or platform commission"
+        },
+        {
+          "id": "a019-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-020",
+      "name": "Multi-location barbershop franchise (Nigeria)",
+      "prompt": "Design a multi-location barbershop and men's grooming franchise platform for Nigeria called CutCulture. Barbers create profiles under their branch, with portfolio photos in Supabase Storage. Customers book a specific barber for haircut, beard trim, or full grooming packages. Multi-branch franchise: the franchise owner views cross-branch KPIs via a materialised view refreshed every 15 minutes. Payments via Paystack card and USSD. No-show policy: after 2 no-shows, prepayment is required. Loyalty: complete 5 bookings to earn a free trim (tracked via loyalty_accounts and loyalty_transactions). SMS reminders via Termii. Full system architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a020-01",
+          "description": "availability_windows for barber weekly schedules",
+          "check": "Section 3 contains 'availability_windows' with day_of_week for barber scheduling"
+        },
+        {
+          "id": "a020-02",
+          "description": "EXCLUDE USING gist prevents barber double-booking",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for barber appointment conflict prevention"
+        },
+        {
+          "id": "a020-03",
+          "description": "branch_kpis materialised view for franchise owner dashboard",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view refreshed by pg_cron"
+        },
+        {
+          "id": "a020-04",
+          "description": "loyalty_accounts with 5-booking milestone for free trim",
+          "check": "Section 3 contains 'loyalty_accounts' and 'loyalty_transactions' for 5-booking milestone"
+        },
+        {
+          "id": "a020-05",
+          "description": "no_show_policy requires prepayment after 2 no-shows",
+          "check": "Section 3 or Section 1 contains 'no_show_policy' or 'require_prepayment' after 2 no-shows"
+        },
+        {
+          "id": "a020-06",
+          "description": "Paystack HMAC webhook verification",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a020-07",
+          "description": "held_until for 15-minute optimistic slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a020-08",
+          "description": "idempotency_key on automation_jobs for duplicate-safe reminders",
+          "check": "Section 3 or Section 7 contains 'idempotency_key' or 'idempotent' on automation jobs"
+        },
+        {
+          "id": "a020-09",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and TERMII_API_KEY in Section 8",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and 'TERMII_API_KEY'"
+        },
+        {
+          "id": "a020-10",
+          "description": "Real NGN service pricing in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) for haircut or grooming prices"
+        },
+        {
+          "id": "a020-11",
+          "description": "waitlist_entries with notify_waitlist trigger for cancellations",
+          "check": "Section 3 contains 'waitlist_entries' and 'notify_waitlist'"
+        },
+        {
+          "id": "a020-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-021",
+      "name": "Laundry pickup & delivery SaaS (Nigeria)",
+      "prompt": "Build a laundry pickup-and-delivery platform for Nigeria called CleanRun. Customers schedule pickups via WhatsApp or app. Riders collect, laundry is processed at partner laundromats, then delivered. Need full 11-section system architecture with Paystack, Termii SMS, GPS tracking, before/after photo evidence, and per-order pricing (weight-based).",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a021-01",
+          "description": "SORF booking status enum all 9 states",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a021-02",
+          "description": "GPS pings append-only for rider tracking",
+          "check": "Section 3 contains 'gps_pings' table or GPS tracking for rider dispatch"
+        },
+        {
+          "id": "a021-03",
+          "description": "job_photos for before/after laundry evidence",
+          "check": "Section 3 contains 'job_photos' or before/after photo evidence for laundry condition"
+        },
+        {
+          "id": "a021-04",
+          "description": "EXCLUDE USING gist prevents double-booking of riders",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for rider or slot conflict prevention"
+        },
+        {
+          "id": "a021-05",
+          "description": "Paystack payment with HMAC webhook",
+          "check": "Section 4 or Section 7 contains Paystack and 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a021-06",
+          "description": "Termii SMS for pickup reminders",
+          "check": "Section 4 or Section 7 contains 'Termii' or 'sendTermiiOtp' for SMS notifications"
+        },
+        {
+          "id": "a021-07",
+          "description": "availability_windows for rider schedules",
+          "check": "Section 3 contains 'availability_windows' for rider or staff scheduling"
+        },
+        {
+          "id": "a021-08",
+          "description": "branch_kpis materialised view for laundromat dashboard",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a021-09",
+          "description": "held_until optimistic slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a021-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and TERMII_API_KEY in env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and 'TERMII_API_KEY'"
+        },
+        {
+          "id": "a021-11",
+          "description": "Weight-based pricing with real NGN amounts",
+          "check": "Section 9 contains specific NGN amounts (₦) for laundry pricing (per kg or per item)"
+        },
+        {
+          "id": "a021-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-022",
+      "name": "Multi-specialty telemedicine platform (Ghana)",
+      "prompt": "Design a telemedicine platform for Ghana called DocLink. Patients book video consultations with doctors across specialties (GP, dermatology, mental health). Payments via MTN Mobile Money (GHS) and card. Prescriptions issued digitally. Need 11-section architecture with Supabase, USSD fallback for feature phones, Africa's Talking, and MTN MoMo integration.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a022-01",
+          "description": "SORF booking status enum all 9 states for consultations",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a022-02",
+          "description": "MTN Mobile Money GHS collections with HMAC-SHA-256 callback",
+          "check": "Section 4 or Section 7 contains MTN Mobile Money or MoMo and 'HMAC' or 'SHA-256' for callback verification"
+        },
+        {
+          "id": "a022-03",
+          "description": "USSD fallback for feature phones",
+          "check": "Section 4 or Section 6 or Section 7 contains 'USSD' session flow for booking or consultation"
+        },
+        {
+          "id": "a022-04",
+          "description": "Africa's Talking for SMS and USSD",
+          "check": "Section 4 or Section 7 contains \"Africa's Talking\" or 'AfricasTalking' for SMS or USSD"
+        },
+        {
+          "id": "a022-05",
+          "description": "EXCLUDE USING gist prevents double-booking of doctors",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for doctor slot conflict prevention"
+        },
+        {
+          "id": "a022-06",
+          "description": "availability_windows for doctor schedules",
+          "check": "Section 3 contains 'availability_windows' for doctor or provider scheduling"
+        },
+        {
+          "id": "a022-07",
+          "description": "Prescription table with digital prescription workflow",
+          "check": "Section 3 contains 'prescription' table or digital prescription issuance"
+        },
+        {
+          "id": "a022-08",
+          "description": "branch_kpis or clinic_kpis materialised view",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' or 'clinic_kpis' materialised view"
+        },
+        {
+          "id": "a022-09",
+          "description": "held_until for 15-minute video slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a022-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and MTN MoMo keys in env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and ('MTN_MNO_API_KEY' or 'MOMO' or 'MTN_CLIENT')"
+        },
+        {
+          "id": "a022-11",
+          "description": "Real GHS consultation pricing in Section 9",
+          "check": "Section 9 contains specific GHS amounts (GH₵ or GHS) for consultation fees"
+        },
+        {
+          "id": "a022-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-023",
+      "name": "Laundry pickup & delivery SaaS (Nigeria)",
+      "prompt": "Build CleanRun — a laundry pickup and delivery platform for Nigeria. Customers schedule pickups. Riders collect garments, laundromats process them, delivery returns clean clothes. Weight-based pricing with Paystack + Termii SMS + GPS rider tracking + before/after condition photos.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a023-01",
+          "description": "SORF booking status enum all 9 states",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a023-02",
+          "description": "gps_pings append-only table for rider tracking",
+          "check": "Section 3 contains 'gps_pings' table with append-only guard trigger"
+        },
+        {
+          "id": "a023-03",
+          "description": "job_photos table for before/after condition evidence",
+          "check": "Section 3 contains 'job_photos' table with 'photo_type' for before/after laundry condition"
+        },
+        {
+          "id": "a023-04",
+          "description": "pricing_rules table for weight-based pricing",
+          "check": "Section 3 contains 'pricing_rules' or weight-based pricing with 'price_per_kg' or 'weight_kg'"
+        },
+        {
+          "id": "a023-05",
+          "description": "EXCLUDE USING gist prevents double-booking of riders",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for rider slot conflict prevention"
+        },
+        {
+          "id": "a023-06",
+          "description": "availability_windows for rider schedules",
+          "check": "Section 3 contains 'availability_windows' for rider or staff scheduling"
+        },
+        {
+          "id": "a023-07",
+          "description": "held_until for 15-minute slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a023-08",
+          "description": "Paystack HMAC webhook verification",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a023-09",
+          "description": "branch_kpis materialised view",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a023-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and TERMII_API_KEY in env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and 'TERMII_API_KEY'"
+        },
+        {
+          "id": "a023-11",
+          "description": "Real NGN weight-based pricing in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) per kg or per item for laundry tiers"
+        },
+        {
+          "id": "a023-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-024",
+      "name": "Pet grooming and veterinary booking (Nigeria)",
+      "prompt": "Design PawPerfect — a pet grooming and veterinary appointment booking platform for Nigeria. Pet owners schedule grooming sessions or vet consultations for dogs and cats. Groomers and vets have individual schedules. Paystack payments, Termii SMS, multi-branch (Lagos + Abuja). Include vaccine records and pet health profiles.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a024-01",
+          "description": "SORF booking status enum all 9 states",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a024-02",
+          "description": "Pet profiles table with species and breed",
+          "check": "Section 3 contains 'pet_profiles' or 'pets' table with 'species' or 'breed' or 'owner_id'"
+        },
+        {
+          "id": "a024-03",
+          "description": "Vaccine or health records table",
+          "check": "Section 3 contains 'vaccine' or 'health_record' or 'vaccination' table or column"
+        },
+        {
+          "id": "a024-04",
+          "description": "EXCLUDE USING gist prevents double-booking of groomer or vet",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for staff slot conflict prevention"
+        },
+        {
+          "id": "a024-05",
+          "description": "availability_windows for groomer and vet schedules",
+          "check": "Section 3 contains 'availability_windows' for staff scheduling"
+        },
+        {
+          "id": "a024-06",
+          "description": "held_until for 15-minute slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a024-07",
+          "description": "Paystack HMAC webhook verification",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a024-08",
+          "description": "waitlist_entries and notify_waitlist trigger",
+          "check": "Section 3 contains 'waitlist_entries' and 'notify_waitlist'"
+        },
+        {
+          "id": "a024-09",
+          "description": "branch_kpis materialised view for multi-branch dashboard",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a024-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and TERMII_API_KEY in env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and 'TERMII_API_KEY'"
+        },
+        {
+          "id": "a024-11",
+          "description": "Real NGN service pricing in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) for grooming or vet consultation fees"
+        },
+        {
+          "id": "a024-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-025",
+      "name": "Event photography booking marketplace (Nigeria)",
+      "prompt": "Build ShutterBook — an event photography and videography booking platform for Nigeria. Event hosts book photographers and videographers for weddings, corporate events, and birthdays. Package-based pricing, 40% deposit at booking, deliverables tracking (photos + highlight reel). Paystack payments, Termii SMS, portfolio galleries for each photographer.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a025-01",
+          "description": "SORF booking status enum all 9 states",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a025-02",
+          "description": "Event packages table with price",
+          "check": "Section 3 contains 'event_packages' or package-based pricing table with price field"
+        },
+        {
+          "id": "a025-03",
+          "description": "Deliverables tracking table",
+          "check": "Section 3 contains 'deliverables' table with status tracking for photos or video"
+        },
+        {
+          "id": "a025-04",
+          "description": "Portfolio items table for photographer galleries",
+          "check": "Section 3 contains 'portfolio_items' or portfolio table for photographer media"
+        },
+        {
+          "id": "a025-05",
+          "description": "EXCLUDE USING gist prevents double-booking of photographers",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for photographer slot conflict prevention"
+        },
+        {
+          "id": "a025-06",
+          "description": "availability_windows for photographer schedules",
+          "check": "Section 3 contains 'availability_windows' for staff or photographer scheduling"
+        },
+        {
+          "id": "a025-07",
+          "description": "held_until for 15-minute slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a025-08",
+          "description": "Paystack HMAC webhook verification",
+          "check": "Section 4 or Section 7 contains 'HMAC' or 'x-paystack-signature'"
+        },
+        {
+          "id": "a025-09",
+          "description": "branch_kpis or studio_kpis materialised view",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' or 'kpis' materialised view"
+        },
+        {
+          "id": "a025-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and TERMII_API_KEY in env vars",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and 'TERMII_API_KEY'"
+        },
+        {
+          "id": "a025-11",
+          "description": "Real NGN package pricing in Section 9",
+          "check": "Section 9 contains specific NGN amounts (₦) for photography or videography packages"
+        },
+        {
+          "id": "a025-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-026",
+      "name": "Multi-country logistics SaaS (Côte d'Ivoire + Senegal)",
+      "prompt": "Design ParcelRun Francophone — a last-mile parcel delivery platform for Côte d'Ivoire and Senegal. Couriers pick up parcels from businesses and deliver to consumers. Payments via Orange Money (XOF). USSD booking for feature-phone users via Africa's Talking. Bilingual SMS (French + English). Track couriers via GPS pings. Full 11-section architecture.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a026-01",
+          "description": "SORF booking status enum all 9 states",
+          "check": "Section 3 contains booking_status enum with pending, confirmed, held, checked_in, in_progress, completed, cancelled, no_show, disputed"
+        },
+        {
+          "id": "a026-02",
+          "description": "Orange Money XOF payment integration",
+          "check": "Section 4 or Section 7 or Section 2 contains 'Orange Money' or 'XOF' or 'orange' payment integration"
+        },
+        {
+          "id": "a026-03",
+          "description": "USSD session flow via Africa's Talking",
+          "check": "Section 4 or Section 6 or Section 7 contains 'USSD' and (\"Africa's Talking\" or 'AfricasTalking')"
+        },
+        {
+          "id": "a026-04",
+          "description": "Bilingual SMS templates (French + English)",
+          "check": "Section 7 or Section 4 contains bilingual or 'fr' or 'French' SMS templates"
+        },
+        {
+          "id": "a026-05",
+          "description": "GPS pings for courier tracking",
+          "check": "Section 3 contains 'gps_pings' or GPS tracking for couriers"
+        },
+        {
+          "id": "a026-06",
+          "description": "EXCLUDE USING gist for courier slot conflict",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for courier scheduling"
+        },
+        {
+          "id": "a026-07",
+          "description": "availability_windows for courier schedules",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a026-08",
+          "description": "branch_kpis materialised view",
+          "check": "Section 3 or Section 5 contains 'branch_kpis' materialised view"
+        },
+        {
+          "id": "a026-09",
+          "description": "held_until for slot hold",
+          "check": "Section 3 or Section 4 contains 'held_until'"
+        },
+        {
+          "id": "a026-10",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and Orange Money env vars in Section 8",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and ('ORANGE_CLIENT_SECRET' or 'ORANGE_MERCHANT_KEY' or 'ORANGE')"
+        },
+        {
+          "id": "a026-11",
+          "description": "Real XOF pricing in Section 9",
+          "check": "Section 9 contains specific XOF or FCFA amounts for delivery pricing"
+        },
+        {
+          "id": "a026-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-027",
+      "name": "Catering & food service booking — Nigeria",
+      "prompt": "Design the full system architecture for CaterPro — a catering and food service booking platform for Nigeria. Event planners book caterers for weddings, corporate events, and parties. Caterers set menus, package prices, and availability by date. Paystack for payments. Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a027-01",
+          "description": "EXCLUDE USING gist for caterer date conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for caterer or date-based booking conflict"
+        },
+        {
+          "id": "a027-02",
+          "description": "Event packages or menu packages table",
+          "check": "Section 3 contains 'event_packages' or 'menu_packages' or 'catering_packages'"
+        },
+        {
+          "id": "a027-03",
+          "description": "Deposit policy for catering bookings",
+          "check": "Section 3 or Section 4 contains 'deposit_policy' for large catering deposits"
+        },
+        {
+          "id": "a027-04",
+          "description": "Paystack payment integration",
+          "check": "Section 7 or Section 8 contains 'Paystack' and ('PAYSTACK_SECRET_KEY' or 'x-paystack-signature')"
+        },
+        {
+          "id": "a027-05",
+          "description": "Termii or AT SMS for OTP and reminders",
+          "check": "Section 8 contains 'TERMII_API_KEY' or 'AT_API_KEY'"
+        },
+        {
+          "id": "a027-06",
+          "description": "All 9 SORF booking states present",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'checked_in', 'in_progress', 'completed', 'cancelled', 'no_show', 'disputed'"
+        },
+        {
+          "id": "a027-07",
+          "description": "availability_windows for caterer schedules",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a027-08",
+          "description": "waitlist_entries table",
+          "check": "Section 3 contains 'waitlist_entries'"
+        },
+        {
+          "id": "a027-09",
+          "description": "branch_kpis materialised view",
+          "check": "Section 3 contains 'branch_kpis'"
+        },
+        {
+          "id": "a027-10",
+          "description": "loyalty_accounts for repeat clients",
+          "check": "Section 3 contains 'loyalty_accounts'"
+        },
+        {
+          "id": "a027-11",
+          "description": "Real NGN pricing in Section 9",
+          "check": "Section 9 contains specific NGN or ₦ amounts for catering packages and commission"
+        },
+        {
+          "id": "a027-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-028",
+      "name": "Multi-location cleaning franchise — Nigeria + Ghana",
+      "prompt": "Build the complete system architecture for SparkClean Pro — a multi-location professional cleaning franchise operating in Nigeria and Ghana. Businesses book cleaners for homes and offices. Multi-staff scheduling, GPS dispatch, before/after photo evidence, Paystack (NGN) and MTN Mobile Money (GHS). Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a028-01",
+          "description": "GPS pings table for cleaner dispatch tracking",
+          "check": "Section 3 contains 'gps_pings' table for cleaner location tracking"
+        },
+        {
+          "id": "a028-02",
+          "description": "Job photos table with before/after evidence",
+          "check": "Section 3 contains 'job_photos' with 'photo_type' enum including 'before' and 'after'"
+        },
+        {
+          "id": "a028-03",
+          "description": "MTN Mobile Money for Ghana collections",
+          "check": "Section 7 or Section 8 contains 'MTN' and ('MoMo' or 'Mobile Money') and ('GHS' or 'Ghana')"
+        },
+        {
+          "id": "a028-04",
+          "description": "Paystack for Nigeria collections",
+          "check": "Section 7 or Section 8 contains 'Paystack' and ('NGN' or 'Nigeria')"
+        },
+        {
+          "id": "a028-05",
+          "description": "EXCLUDE USING gist for cleaner scheduling",
+          "check": "Section 3 contains 'EXCLUDE USING gist' for cleaner slot conflict"
+        },
+        {
+          "id": "a028-06",
+          "description": "branch_kpis materialised view for franchise",
+          "check": "Section 3 contains 'branch_kpis'"
+        },
+        {
+          "id": "a028-07",
+          "description": "All 9 SORF booking states",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'in_progress', 'completed', 'cancelled', 'no_show'"
+        },
+        {
+          "id": "a028-08",
+          "description": "Multi-currency support for NGN + GHS",
+          "check": "Section 3 or Section 9 contains ('NGN' and 'GHS') or 'multi-currency'"
+        },
+        {
+          "id": "a028-09",
+          "description": "SUPABASE_SERVICE_ROLE_KEY and MTN env vars in Section 8",
+          "check": "Section 8 contains 'SUPABASE_SERVICE_ROLE_KEY' and ('MTN_MNO_API_KEY' or 'MTN_MNO_SUBSCRIPTION_KEY')"
+        },
+        {
+          "id": "a028-10",
+          "description": "availability_windows for cleaner schedules",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a028-11",
+          "description": "Real NGN and GHS pricing in Section 9",
+          "check": "Section 9 contains specific amounts in ₦ or NGN and GH₵ or GHS for cleaning services"
+        },
+        {
+          "id": "a028-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 6 cases pass."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 28 cases pass. Target: 28 cases, 303 assertions."
   }
 }

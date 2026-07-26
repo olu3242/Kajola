@@ -19,7 +19,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run validation
+      - name: Run skill structure validation
         run: |
           chmod +x scripts/validate-skill.sh
           bash scripts/validate-skill.sh
+
+      - name: Run example SORF compliance checks
+        run: |
+          chmod +x scripts/check-example.sh
+          FAILED=0
+          for f in examples/*.md; do
+            [ "$f" = "examples/README.md" ] && continue
+            echo "--- Checking $f ---"
+            bash scripts/check-example.sh "$f" || FAILED=$((FAILED + 1))
+          done
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::$FAILED example(s) failed SORF compliance checks"
+            exit 1
+          fi

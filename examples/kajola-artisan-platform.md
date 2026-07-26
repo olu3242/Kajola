@@ -2083,11 +2083,11 @@ jobs:
 
 ### 9.2 Transaction Fee Detail
 
-Every booking of ₦X generates:
-- Client pays: ₦X
-- Platform fee (10%): ₦X × 0.10
-- Artisan receives: ₦X × 0.90
-- Paystack processing cost: ~1.5% of ₦X (borne by platform, deducted from 10% margin)
+Every booking (illustrative average: ₦5,000) generates:
+- Client pays: ₦5,000
+- Platform fee (10%): ₦500
+- Artisan receives: ₦4,500
+- Paystack processing cost: ~1.5% of ₦5,000 = ₦75 (borne by platform, deducted from 10% margin)
 - **Net platform margin per transaction: ~8.5% of booking value**
 
 Example — ₦5,000 haircut:
@@ -2223,3 +2223,93 @@ For Pro tier, use Paystack subaccount split:
 - **Timezone**: Africa/Lagos (WAT, UTC+1) used for cron schedules and display formatting.
 - **Payout method**: Paystack Transfer to artisan bank accounts. Artisans must complete Paystack recipient setup before first payout.
 - **Data residency**: Supabase hosted on AWS `af-south-1` (Cape Town) — closest available region to Nigeria. No in-country Nigeria hosting available via Supabase as of Q1 2026.
+
+---
+
+## SORF Framework Baseline
+
+_This section documents the SORF (Service Operations Reliability Framework) invariants that every Kajola-generated platform implements. Added as a canonical reference after the SORF standard was formalised._
+
+### Booking State Machine
+
+```sql
+-- All 9 SORF booking states — present in every generated schema
+CREATE TYPE booking_status AS ENUM (
+  'pending',      -- created, awaiting payment
+  'confirmed',    -- payment received / free service confirmed
+  'held',         -- optimistic 15-min slot hold; held_until timestamptz
+  'checked_in',   -- customer arrived
+  'in_progress',  -- service underway
+  'completed',    -- done; payout eligible
+  'cancelled',    -- cancelled before start
+  'no_show',      -- customer did not arrive
+  'disputed'      -- payout frozen pending review
+);
+
+-- bookings table includes:
+--   held_until timestamptz — released by pg_cron if payment not received
+--   EXCLUDE USING gist (staff_id WITH =, branch_id WITH =,
+--     tstzrange(starts_at, ends_at, '[)') WITH &&)
+--     WHERE (status NOT IN ('cancelled', 'no_show'))
+```
+
+### Required SORF Tables
+
+```sql
+-- Staff scheduling (recurring weekly availability)
+CREATE TABLE availability_windows (
+  id uuid PRIMARY KEY, staff_id uuid NOT NULL, day_of_week int, start_time time, end_time time
+);
+-- One-off schedule overrides (holidays, extra shifts)
+CREATE TABLE availability_overrides (
+  id uuid PRIMARY KEY, staff_id uuid NOT NULL, override_date date, is_available boolean
+);
+
+-- Waitlist — trigger fires on every booking cancellation or no_show
+CREATE TABLE waitlist_entries (id uuid PRIMARY KEY, customer_id uuid, service_id uuid, notified_at timestamptz);
+-- notify_waitlist trigger: INSERT INTO automation_jobs WHERE NEW.status IN ('cancelled','no_show')
+
+-- Business policies (jsonb — branch-level overrides allowed)
+-- businesses.deposit_policy  jsonb DEFAULT '{"require_deposit":false,"deposit_percent":0}'
+-- businesses.no_show_policy  jsonb DEFAULT '{"warn_on_first":true,"require_prepayment_after":1}'
+
+-- Loyalty programme
+CREATE TABLE loyalty_accounts (id uuid PRIMARY KEY, customer_id uuid, points_balance int DEFAULT 0);
+CREATE TABLE loyalty_transactions (
+  id uuid PRIMARY KEY, account_id uuid, points_delta int,
+  idempotency_key text UNIQUE NOT NULL
+);
+
+-- Async job queue (idempotent)
+CREATE TABLE automation_jobs (
+  id uuid PRIMARY KEY, job_type text, payload jsonb,
+  idempotency_key text UNIQUE NOT NULL, status text DEFAULT 'pending', run_at timestamptz
+);
+
+-- Branch performance (materialised view, refreshed every 15 min)
+CREATE MATERIALIZED VIEW branch_kpis AS
+  SELECT branch_id, COUNT(*) AS bookings_today, SUM(total_amount) AS revenue_today
+  FROM bookings WHERE starts_at >= CURRENT_DATE GROUP BY branch_id WITH DATA;
+SELECT cron.schedule('refresh_branch_kpis','*/15 * * * *','REFRESH MATERIALIZED VIEW CONCURRENTLY branch_kpis');
+```
+
+### Deployment — Canonical Env Vars
+
+| Variable | Source |
+|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard |
+| `PAYSTACK_SECRET_KEY` | Paystack dashboard |
+| `TERMII_API_KEY` | Termii dashboard |
+
+### Paystack Webhook (HMAC-SHA-512 Verification)
+
+```typescript
+// webhook handler — verify HMAC before processing any event
+const sig = req.headers.get('x-paystack-signature');
+const body = await req.text();
+const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(PAYSTACK_SECRET_KEY),
+  {name:'HMAC',hash:'SHA-512'}, false, ['sign']);
+const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
+const expected = Array.from(new Uint8Array(mac)).map(b=>b.toString(16).padStart(2,'0')).join('');
+if (sig !== expected) return new Response('Unauthorized', {status:401});
+```
