@@ -2019,11 +2019,31 @@
           "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
         }
       ]
+    },
+    {
+      "id": "eval-033",
+      "name": "SCOS Enterprise Platform — Multi-tenant multi-country deployment",
+      "prompt": "Design the full enterprise system architecture for Kajola SCOS. It's Africa's Service Commerce Operating System: a multi-tenant, multi-country platform (Nigeria + Kenya + Ghana) that powers consumer booking apps, provider management apps, franchise portals, enterprise portals, and an admin console. All 55 engines active. WRF certified. Paystack (Nigeria), M-Pesa Daraja (Kenya), MTN MoMo (Ghana). Termii (West Africa), Africa's Talking (East Africa). Generate all 13 sections including Section 12 (Multi-tenant Architecture) and Section 13 (WRF Certification).",
+      "expected_sections": [1,2,3,4,5,6,7,8,9,10,11,12,13],
+      "assertions": [
+        {"id": "e033-01", "description": "SCOS positioning — not a booking app, full OS", "check": "Service Commerce Operating System|SCOS|operating system"},
+        {"id": "e033-02", "description": "WRF section with all 8 requirements", "check": "Workstream Reliability Framework|WRF.*certif|8.*WRF"},
+        {"id": "e033-03", "description": "Multi-tenant hierarchy (Platform → Country → Region → Franchise → Branch)", "check": "Platform.*Country.*Franchise.*Branch|tenant.*hierarch|parent_tenant_id"},
+        {"id": "e033-04", "description": "audit_logs table with actor, action, before/after", "check": "audit_logs.*before_state|before_state.*after_state|actor_id.*action.*entity"},
+        {"id": "e033-05", "description": "platform_metrics telemetry table", "check": "platform_metrics.*metric_name|metric_name.*metric_value"},
+        {"id": "e033-06", "description": "gratuities table with staff_id and amount_kobo", "check": "gratuities.*staff_id|gratuity.*amount_kobo|gratuity.*tip"},
+        {"id": "e033-07", "description": "tenants.config jsonb with platform_commission_pct", "check": "tenants.*config.*jsonb|platform_commission_pct|tenants\\.config"},
+        {"id": "e033-08", "description": "Multi-country payments (Paystack + M-Pesa + MTN MoMo)", "check": "Paystack.*M-Pesa.*MTN|M-Pesa Daraja.*MTN MoMo|paystack.*mpesa.*momo"},
+        {"id": "e033-09", "description": "All 6 portals: Customer, Provider, Business, Franchise, Enterprise, Admin", "check": "Customer App.*Provider App|Business Portal.*Franchise Portal|Enterprise Portal.*Admin Console"},
+        {"id": "e033-10", "description": "Section 12 — Multi-tenant Architecture", "check": "Section 12|SECTION 12|Multi-tenant Architecture"},
+        {"id": "e033-11", "description": "Section 13 — WRF Certification checklist", "check": "Section 13|SECTION 13|WRF Certification"},
+        {"id": "e033-12", "description": "staff_leaderboard materialized view for recognition", "check": "staff_leaderboard|recognition.*badge|gratuity.*recogni"}
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 32 cases pass. Target: 32 cases, 351 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 33 cases pass. Target: 33 cases, 363 assertions."
   }
 }

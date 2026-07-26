@@ -229,10 +229,10 @@ fi
 
 # At least 14 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 30 ]]; then
-  check "evals.json has at least 30 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 31 ]]; then
+  check "evals.json has at least 31 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 30 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 31 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -254,10 +254,10 @@ import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 340 ]]; then
-  check "evals.json has at least 340 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 363 ]]; then
+  check "evals.json has at least 363 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 340 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 363 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present
@@ -274,6 +274,18 @@ assert_contains "README.md" "git clone\|git submodule" "Installation instruction
 assert_contains "README.md" "SKILL.md"                  "SKILL.md referenced"
 assert_contains "README.md" "evals"                     "evals referenced"
 assert_not_contains "README.md" "femi-adeyemo/kajola-skill" "Old author clone URL removed"
+
+echo ""
+echo "[ SCOS / WRF — new checks ]"
+assert_contains "SKILL.md" "Workstream Reliability Framework\|WRF.*certif" "WRF section in SKILL.md"
+assert_contains "SKILL.md" "audit_logs\|platform_metrics" "WRF tables defined in SKILL.md"
+assert_contains "SKILL.md" "gratuities\|Gratuity.*Recognition\|Gratuity Engine" "Gratuity engine defaults in SKILL.md"
+assert_contains "SKILL.md" "tenants.*config.*jsonb\|Multi-tenant Hierarchy\|tenant.*hierarch" "Multi-tenant hierarchy section in SKILL.md"
+assert_contains "SKILL.md" "Section 12\|SECTION 12\|Multi-tenant Architecture.*Enterprise" "Section 12 template in SKILL.md"
+assert_contains "SKILL.md" "Section 13\|SECTION 13\|WRF Certification" "Section 13 template in SKILL.md"
+assert_contains "examples/kajola-scos-enterprise.md" "SCOS\|Service Commerce Operating System" "SCOS example exists and has SCOS positioning"
+assert_contains "examples/kajola-scos-enterprise.md" "audit_logs\|platform_metrics" "SCOS example has WRF tables"
+assert_contains "examples/kajola-scos-enterprise.md" "gratuities\|staff_leaderboard" "SCOS example has gratuity/recognition tables"
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
