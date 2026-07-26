@@ -1,0 +1,2 @@
+-- no-op: apps/web/app/api/generate/route.ts adds a streaming Claude API route
+-- that is purely application logic. No schema changes.

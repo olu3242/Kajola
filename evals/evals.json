@@ -1747,11 +1747,303 @@
           "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
         }
       ]
+    },
+    {
+      "id": "eval-029",
+      "name": "Two-sided beauty marketplace — Nigeria (HairBook-style)",
+      "prompt": "Build the complete system architecture for HairBook Nigeria — a two-sided marketplace where consumers discover and book hair stylists, nail technicians, and makeup artists. Stylists manage their own schedules and portfolios. Platform takes 20% commission on all bookings. Paystack for payments, Termii for OTP, WhatsApp Business API for booking confirmations and reminders. Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a029-01",
+          "description": "provider_profiles table with slug and full-text search",
+          "check": "Section 3 contains 'provider_profiles' with 'slug' and ('search_vector' or 'tsvector')"
+        },
+        {
+          "id": "a029-02",
+          "description": "portfolio_photos table for stylist gallery",
+          "check": "Section 3 contains 'portfolio_photos' table"
+        },
+        {
+          "id": "a029-03",
+          "description": "commission_settings and staff_earnings for 20% cut",
+          "check": "Section 3 contains 'commission_settings' and 'staff_earnings'"
+        },
+        {
+          "id": "a029-04",
+          "description": "WhatsApp Business API for booking notifications",
+          "check": "Section 7 or Section 8 contains ('WhatsApp' or 'WHATSAPP') and ('template' or 'booking_confirmed' or 'appointment_reminder')"
+        },
+        {
+          "id": "a029-05",
+          "description": "WHATSAPP env vars in Section 8",
+          "check": "Section 8 contains 'WHATSAPP_PHONE_NUMBER_ID' or 'WHATSAPP_ACCESS_TOKEN'"
+        },
+        {
+          "id": "a029-06",
+          "description": "EXCLUDE USING gist for booking conflict prevention",
+          "check": "Section 3 contains 'EXCLUDE USING gist'"
+        },
+        {
+          "id": "a029-07",
+          "description": "All 9 SORF booking states present",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'in_progress', 'completed', 'cancelled', 'no_show', 'disputed'"
+        },
+        {
+          "id": "a029-08",
+          "description": "service_bundles or bundle_credits for pre-paid packs",
+          "check": "Section 3 contains ('service_bundles' or 'bundle_credits')"
+        },
+        {
+          "id": "a029-09",
+          "description": "walkin_queue for walk-in POS",
+          "check": "Section 3 contains 'walkin_queue'"
+        },
+        {
+          "id": "a029-10",
+          "description": "loyalty_accounts and loyalty_transactions",
+          "check": "Section 3 contains 'loyalty_accounts' and 'loyalty_transactions'"
+        },
+        {
+          "id": "a029-11",
+          "description": "Real NGN amounts in monetization section",
+          "check": "Section 9 contains specific amounts in ₦ or NGN for platform commission or service fees"
+        },
+        {
+          "id": "a029-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-030",
+      "name": "Wedding & event vendor marketplace — Nigeria",
+      "prompt": "Build the complete system architecture for WedPlan Nigeria — a marketplace where couples book wedding vendors (photographers, caterers, DJs, florists, and venues) for their wedding day. Multi-vendor bookings tied to a single event date. Mandatory 50% deposit to hold a vendor. Paystack for payments, Termii for OTP. Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a030-01",
+          "description": "events or wedding_events table for the anchor date",
+          "check": "Section 3 contains ('events' or 'wedding_events' or 'event_date') table or column"
+        },
+        {
+          "id": "a030-02",
+          "description": "Multi-vendor booking model (bookings linked to event)",
+          "check": "Section 3 contains 'event_id' or multiple vendor categories linked to a booking"
+        },
+        {
+          "id": "a030-03",
+          "description": "deposit_policy or 50% deposit requirement",
+          "check": "Section 3 contains 'deposit_policy' or ('deposit' and ('50' or '0.5' or 'percent'))"
+        },
+        {
+          "id": "a030-04",
+          "description": "EXCLUDE USING gist for vendor slot conflict on event date",
+          "check": "Section 3 contains 'EXCLUDE USING gist'"
+        },
+        {
+          "id": "a030-05",
+          "description": "All 9 SORF booking states present",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'completed', 'cancelled', 'no_show', 'disputed'"
+        },
+        {
+          "id": "a030-06",
+          "description": "Paystack for Nigeria payments",
+          "check": "Section 7 or Section 8 contains 'Paystack' and ('NGN' or 'Nigeria')"
+        },
+        {
+          "id": "a030-07",
+          "description": "Termii or similar for OTP",
+          "check": "Section 8 contains ('TERMII_API_KEY' or 'Termii') or Section 2 contains 'Termii'"
+        },
+        {
+          "id": "a030-08",
+          "description": "vendor_categories or service_categories for vendor types",
+          "check": "Section 3 contains ('vendor_categor' or 'service_categor' or ('photographer' and 'caterer') or ('vendor_type'))"
+        },
+        {
+          "id": "a030-09",
+          "description": "availability_windows for vendor availability",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a030-10",
+          "description": "waitlist or enquiry flow for booked-out dates",
+          "check": "Section 3 contains ('waitlist' or 'enquiry' or 'inquiry')"
+        },
+        {
+          "id": "a030-11",
+          "description": "Real NGN amounts for vendor packages in Section 9",
+          "check": "Section 9 contains specific amounts in ₦ or NGN for vendor packages or platform fee"
+        },
+        {
+          "id": "a030-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-031",
+      "name": "Two-sided artisan marketplace with vendor payouts — Nigeria",
+      "prompt": "Build the complete system architecture for ArtisanPay Nigeria — a two-sided marketplace where businesses book skilled artisans (plumbers, electricians, carpenters, welders). Platform collects 100% of the service fee from the business, takes a 15% commission, and pays the artisan the remaining 85% weekly via Paystack Transfer. Paystack for collections, Termii for OTP. Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a031-01",
+          "description": "payout_ledger table for settlement tracking",
+          "check": "Section 3 contains 'payout_ledger'"
+        },
+        {
+          "id": "a031-02",
+          "description": "vendor_bank_accounts or bank_accounts for payout registration",
+          "check": "Section 3 contains ('vendor_bank_accounts' or 'bank_accounts') and ('paystack_recipient_code' or 'recipient_code')"
+        },
+        {
+          "id": "a031-03",
+          "description": "Paystack Transfer or payout initiation in API section",
+          "check": "Section 7 or Section 8 contains ('transfer' or 'Transfer' or 'payout') and 'Paystack'"
+        },
+        {
+          "id": "a031-04",
+          "description": "Platform commission stored or referenced (15%)",
+          "check": "Section 3 or Section 9 contains ('15' and ('commission' or 'platform_fee' or 'payout')) or 'platform_commission_pct'"
+        },
+        {
+          "id": "a031-05",
+          "description": "EXCLUDE USING gist for artisan slot conflict",
+          "check": "Section 3 contains 'EXCLUDE USING gist'"
+        },
+        {
+          "id": "a031-06",
+          "description": "All 9 SORF booking states present",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'completed', 'cancelled', 'no_show', 'disputed'"
+        },
+        {
+          "id": "a031-07",
+          "description": "Paystack for collections",
+          "check": "Section 7 or Section 8 contains 'Paystack' and ('NGN' or 'Nigeria' or 'PAYSTACK_SECRET_KEY')"
+        },
+        {
+          "id": "a031-08",
+          "description": "availability_windows for artisan schedules",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a031-09",
+          "description": "Weekly payout schedule or automation",
+          "check": "Section 7 or Section 3 contains ('weekly' or 'payout.batch' or 'Monday' or 'cron.*payout')"
+        },
+        {
+          "id": "a031-10",
+          "description": "Webhook HMAC verification for Paystack",
+          "check": "Section 7 contains ('x-paystack-signature' or 'HMAC' or 'createHmac')"
+        },
+        {
+          "id": "a031-11",
+          "description": "Real NGN amounts in Section 9",
+          "check": "Section 9 contains specific amounts in ₦ or NGN for artisan service fees"
+        },
+        {
+          "id": "a031-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-032",
+      "name": "Consumer fitness app with referral programme — Nigeria",
+      "prompt": "Build the complete system architecture for FitReferral Nigeria — a fitness booking app where members book gym sessions and personal training. Members earn ₦1,000 credit for every friend they refer who completes their first paid session. Paystack Recurring for monthly memberships, Termii for OTP. Full system architecture package.",
+      "expected_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "assertions": [
+        {
+          "id": "a032-01",
+          "description": "referral_codes table for member referral links",
+          "check": "Section 3 contains 'referral_codes' or 'referral_code'"
+        },
+        {
+          "id": "a032-02",
+          "description": "referral_conversions or referral tracking table",
+          "check": "Section 3 contains ('referral_conversions' or 'referral_rewards' or 'referee_id')"
+        },
+        {
+          "id": "a032-03",
+          "description": "Paystack Recurring for memberships",
+          "check": "Section 7 or Section 8 contains ('Paystack' and ('Recurring' or 'subscription' or 'plan' or 'paystack_sub_code'))"
+        },
+        {
+          "id": "a032-04",
+          "description": "class_sessions or fitness booking with capacity",
+          "check": "Section 3 contains ('class_sessions' or 'capacity' or 'max_capacity' or 'enrollments')"
+        },
+        {
+          "id": "a032-05",
+          "description": "EXCLUDE USING gist for session conflict",
+          "check": "Section 3 contains 'EXCLUDE USING gist'"
+        },
+        {
+          "id": "a032-06",
+          "description": "All 9 SORF booking states present",
+          "check": "Section 3 contains all of: 'pending', 'confirmed', 'held', 'completed', 'cancelled', 'no_show', 'disputed'"
+        },
+        {
+          "id": "a032-07",
+          "description": "loyalty_accounts for member points or credit balance",
+          "check": "Section 3 contains 'loyalty_accounts'"
+        },
+        {
+          "id": "a032-08",
+          "description": "Referral reward value of ₦1,000 or 100000 kobo",
+          "check": "Section 3 or Section 9 contains ('1,000' or '1000' or '100000') and ('referral' or 'reward' or 'credit')"
+        },
+        {
+          "id": "a032-09",
+          "description": "memberships table with paystack_sub_code",
+          "check": "Section 3 contains 'memberships' or 'membership'"
+        },
+        {
+          "id": "a032-10",
+          "description": "availability_windows for trainer schedules",
+          "check": "Section 3 contains 'availability_windows'"
+        },
+        {
+          "id": "a032-11",
+          "description": "Real NGN amounts in Section 9",
+          "check": "Section 9 contains specific amounts in ₦ or NGN for membership fees or session pricing"
+        },
+        {
+          "id": "a032-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "your_value_here", "X%", "add more columns", "₦X,000"]
+        }
+      ]
+    },
+    {
+      "id": "eval-033",
+      "name": "SCOS Enterprise Platform — Multi-tenant multi-country deployment",
+      "prompt": "Design the full enterprise system architecture for Kajola SCOS. It's Africa's Service Commerce Operating System: a multi-tenant, multi-country platform (Nigeria + Kenya + Ghana) that powers consumer booking apps, provider management apps, franchise portals, enterprise portals, and an admin console. All 55 engines active. WRF certified. Paystack (Nigeria), M-Pesa Daraja (Kenya), MTN MoMo (Ghana). Termii (West Africa), Africa's Talking (East Africa). Generate all 13 sections including Section 12 (Multi-tenant Architecture) and Section 13 (WRF Certification).",
+      "expected_sections": [1,2,3,4,5,6,7,8,9,10,11,12,13],
+      "assertions": [
+        {"id": "e033-01", "description": "SCOS positioning — not a booking app, full OS", "check": "Service Commerce Operating System|SCOS|operating system"},
+        {"id": "e033-02", "description": "WRF section with all 8 requirements", "check": "Workstream Reliability Framework|WRF.*certif|8.*WRF"},
+        {"id": "e033-03", "description": "Multi-tenant hierarchy (Platform → Country → Region → Franchise → Branch)", "check": "Platform.*Country.*Franchise.*Branch|tenant.*hierarch|parent_tenant_id"},
+        {"id": "e033-04", "description": "audit_logs table with actor, action, before/after", "check": "audit_logs.*before_state|before_state.*after_state|actor_id.*action.*entity"},
+        {"id": "e033-05", "description": "platform_metrics telemetry table", "check": "platform_metrics.*metric_name|metric_name.*metric_value"},
+        {"id": "e033-06", "description": "gratuities table with staff_id and amount_kobo", "check": "gratuities.*staff_id|gratuity.*amount_kobo|gratuity.*tip"},
+        {"id": "e033-07", "description": "tenants.config jsonb with platform_commission_pct", "check": "tenants.*config.*jsonb|platform_commission_pct|tenants\\.config"},
+        {"id": "e033-08", "description": "Multi-country payments (Paystack + M-Pesa + MTN MoMo)", "check": "Paystack.*M-Pesa.*MTN|M-Pesa Daraja.*MTN MoMo|paystack.*mpesa.*momo"},
+        {"id": "e033-09", "description": "All 6 portals: Customer, Provider, Business, Franchise, Enterprise, Admin", "check": "Customer App.*Provider App|Business Portal.*Franchise Portal|Enterprise Portal.*Admin Console"},
+        {"id": "e033-10", "description": "Section 12 — Multi-tenant Architecture", "check": "Section 12|SECTION 12|Multi-tenant Architecture"},
+        {"id": "e033-11", "description": "Section 13 — WRF Certification checklist", "check": "Section 13|SECTION 13|WRF Certification"},
+        {"id": "e033-12", "description": "staff_leaderboard materialized view for recognition", "check": "staff_leaderboard|recognition.*badge|gratuity.*recogni"}
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 28 cases pass. Target: 28 cases, 303 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 33 cases pass. Target: 33 cases, 363 assertions."
   }
 }

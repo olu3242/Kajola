@@ -348,7 +348,7 @@ async function transitionBookingState(
   if (toStatus === "checked_in")  patch.checked_in_at = new Date().toISOString();
   if (toStatus === "in_progress") patch.started_at    = new Date().toISOString();
   if (toStatus === "completed")   patch.completed_at  = new Date().toISOString();
-  if (toStatus === "cancelled")   { patch.cancelled_at = new Date().toISOString(); patch.cancel_reason = meta.reason ?? ""; }
+  if (toStatus === "cancelled")   { patch.cancelled_at = new Date().toISOString(); patch.cancellation_reason = meta.reason ?? ""; }
   if (toStatus === "confirmed")   patch.held_until    = null;  // clear hold timer
 
   // 3. Apply
@@ -361,9 +361,9 @@ async function transitionBookingState(
 
   // 4. Enqueue automation event (fire-and-forget via automation_jobs)
   await supabase.from("automation_jobs").insert({
-    event_type:      `booking.${toStatus}`,
+    job_type:        `booking.${toStatus}`,
     payload:         { booking_id: bookingId, from_status: from, actor_id: meta.userId },
-    idempotency_key: `booking-${bookingId}-${toStatus}-${Date.now()}`,
+    idempotency_key: `booking-${bookingId}-${toStatus}`,
   });
 
   return { ok: true };
@@ -429,10 +429,10 @@ async function initiateDeposit(req: Request): Promise<Response> {
 
   const idempotencyKey = `booking-${booking_id}-deposit`;
 
-  // Upsert momo_transactions — idempotent: if already initiated, return existing reference
-  const { data: existing } = await supabase.from("momo_transactions").select("provider_reference").eq("idempotency_key", idempotencyKey).maybeSingle();
-  if (existing?.provider_reference) {
-    return ok({ checkout_request_id: existing.provider_reference, message: "STK Push already sent — check your phone" });
+  // Upsert mobile_money_transactions — idempotent: if already initiated, return existing reference
+  const { data: existing } = await supabase.from("mobile_money_transactions").select("provider_ref").eq("idempotency_key", idempotencyKey).maybeSingle();
+  if (existing?.provider_ref) {
+    return ok({ checkout_request_id: existing.provider_ref, message: "STK Push already sent — check your phone" });
   }
 
   // Initiate STK Push
@@ -443,15 +443,15 @@ async function initiateDeposit(req: Request): Promise<Response> {
     description: `Deposit`,
   });
 
-  await supabase.from("momo_transactions").insert({
-    tenant_id:       booking.tenant_id,
-    booking_id:      booking_id,
-    customer_id:     user.id,
-    provider:        "mpesa_ke",
-    momo_direction:  "c2b",
-    amount_kes:      booking.deposit_kes,
+  await supabase.from("mobile_money_transactions").insert({
+    tenant_id:    booking.tenant_id,
+    booking_id:   booking_id,
+    customer_id:  user.id,
+    provider:     "mpesa_ke",
+    direction:    "c2b",
+    amount:       booking.deposit_kes,
     phone,
-    provider_reference: CheckoutRequestID,
+    provider_ref: CheckoutRequestID,
     idempotency_key: idempotencyKey,
   });
 
@@ -469,19 +469,19 @@ async function creditLoyaltyPoints(bookingId: string): Promise<void> {
   if (!booking) return;
 
   const idempotencyKey = `loyalty-${bookingId}-earn`;
-  const { data: existing } = await supabase.from("loyalty_transactions").select("id").eq("booking_id", bookingId).eq("tx_type", "earn").maybeSingle();
+  const { data: existing } = await supabase.from("loyalty_transactions").select("id").eq("idempotency_key", idempotencyKey).maybeSingle();
   if (existing) return;  // already credited — idempotent
 
-  // 1 point per KES spent (integer, no sub-point)
-  const points = booking.price_kes;
+  // 1 point per currency unit spent (integer, no sub-point)
+  const pointsDelta = booking.total_amount ?? booking.price_kes ?? 0;
 
   // Upsert loyalty account (create if first booking)
   const { data: account } = await supabase.from("loyalty_accounts")
     .upsert({ tenant_id: booking.tenant_id, customer_id: booking.customer_id }, { onConflict: "customer_id" })
     .select("id, points_balance, lifetime_points").single();
 
-  const newBalance       = account.points_balance  + points;
-  const newLifetime      = account.lifetime_points + points;
+  const newBalance  = account.points_balance  + pointsDelta;
+  const newLifetime = account.lifetime_points + pointsDelta;
 
   // Determine tier upgrade
   const newTier = newLifetime >= 50000 ? "platinum" : newLifetime >= 20000 ? "gold" : newLifetime >= 5000 ? "silver" : "bronze";
@@ -489,12 +489,14 @@ async function creditLoyaltyPoints(bookingId: string): Promise<void> {
   await Promise.all([
     supabase.from("loyalty_accounts").update({ points_balance: newBalance, lifetime_points: newLifetime, tier: newTier }).eq("id", account.id),
     supabase.from("loyalty_transactions").insert({
-      tenant_id:    booking.tenant_id,
-      account_id:   account.id,
-      booking_id:   bookingId,
-      tx_type:      "earn",
-      points:       points,
-      balance_after: newBalance,
+      tenant_id:      booking.tenant_id,
+      account_id:     account.id,
+      booking_id:     bookingId,
+      event_type:     "points_earned",
+      points_delta:   pointsDelta,
+      balance_after:  newBalance,
+      description:    `Earned ${pointsDelta} points for booking ${bookingId}`,
+      idempotency_key: idempotencyKey,
     }),
   ]);
 }
@@ -853,6 +855,8 @@ interface FlutterwaveChargeParams {
   customerPhone: string;
   customerName: string;
   redirectUrl: string;     // where to send customer after payment
+  platformName?: string;   // displayed on the Flutterwave payment page
+  logoUrl?: string;        // platform logo URL for the payment page
   meta?: Record<string, unknown>;
 }
 
@@ -877,8 +881,8 @@ async function initiateFlutterwavePayment(
       },
       meta: params.meta ?? {},
       customizations: {
-        title: "CleanRun Payment",
-        logo: "https://cleanrun.app/logo.png",
+        title: params.platformName ?? "Payment",
+        ...(params.logoUrl ? { logo: params.logoUrl } : {}),
       },
     }),
   });
@@ -1354,3 +1358,372 @@ const path = await uploadPrivateFile(
 - Prefer short expiry (300s) for sensitive documents; use 3600s for app-session contexts only
 
 Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+---
+
+## WhatsApp Business API (Meta Cloud API)
+
+Send booking confirmations, reminders, and OTP messages via WhatsApp. Use WhatsApp as the primary notification channel for customers who opt in (`profiles.whatsapp_opted_in = true`); fall back to SMS (Termii/Africa's Talking) for all others.
+
+### Send WhatsApp Template Message
+
+```typescript
+// supabase/functions/_shared/whatsapp.ts
+
+interface WhatsAppTemplateMessage {
+  to: string;                          // E.164 phone number, e.g. "+2348012345678"
+  templateName: string;                // Approved template name on Meta dashboard
+  languageCode?: string;               // Default: "en"
+  components?: WhatsAppTemplateComponent[];
+}
+
+interface WhatsAppTemplateComponent {
+  type: "header" | "body" | "button";
+  parameters: Array<
+    | { type: "text"; text: string }
+    | { type: "date_time"; date_time: { fallback_value: string } }
+    | { type: "currency"; currency: { fallback_value: string; code: string; amount_1000: number } }
+    | { type: "payload"; payload: string }
+  >;
+}
+
+interface WhatsAppMessageResponse {
+  messages: Array<{ id: string }>;
+}
+
+export async function sendWhatsAppTemplate(
+  msg: WhatsAppTemplateMessage
+): Promise<WhatsAppMessageResponse> {
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID")!;
+  const accessToken   = Deno.env.get("WHATSAPP_ACCESS_TOKEN")!;
+
+  const res = await fetch(
+    `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: msg.to.replace("+", ""),
+        type: "template",
+        template: {
+          name: msg.templateName,
+          language: { code: msg.languageCode ?? "en" },
+          components: msg.components ?? [],
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(`WhatsApp API error: ${err.error?.message ?? res.statusText}`);
+  }
+  return res.json();
+}
+```
+
+### Booking Confirmation Message
+
+```typescript
+// Template name: "booking_confirmed" (pre-approved on Meta Business Manager)
+// Template body: "Hi {{1}}, your appointment at {{2}} is confirmed for {{3}} at {{4}}. 📍 {{5}}. Ref: {{6}}"
+
+export async function sendBookingConfirmationWhatsApp(params: {
+  phone: string;
+  customerName: string;
+  businessName: string;
+  appointmentDate: string;   // e.g. "Monday, 28 July 2026"
+  appointmentTime: string;   // e.g. "10:00 AM"
+  branchAddress: string;
+  bookingRef: string;
+}): Promise<void> {
+  await sendWhatsAppTemplate({
+    to: params.phone,
+    templateName: "booking_confirmed",
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: params.customerName },
+          { type: "text", text: params.businessName },
+          { type: "text", text: params.appointmentDate },
+          { type: "text", text: params.appointmentTime },
+          { type: "text", text: params.branchAddress },
+          { type: "text", text: params.bookingRef },
+        ],
+      },
+    ],
+  });
+}
+```
+
+### Appointment Reminder Message
+
+```typescript
+// Template name: "appointment_reminder"
+// Template body: "Reminder: {{1}}, you have an appointment at {{2}} tomorrow at {{3}}. Reply CANCEL to cancel."
+
+export async function sendAppointmentReminderWhatsApp(params: {
+  phone: string;
+  customerName: string;
+  businessName: string;
+  appointmentTime: string;
+}): Promise<void> {
+  await sendWhatsAppTemplate({
+    to: params.phone,
+    templateName: "appointment_reminder",
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: params.customerName },
+          { type: "text", text: params.businessName },
+          { type: "text", text: params.appointmentTime },
+        ],
+      },
+    ],
+  });
+}
+```
+
+### WhatsApp OTP Message
+
+```typescript
+// Template name: "otp_code" (must use Meta's OTP template category)
+// Template body: "{{1}} is your {{2}} verification code. Valid for {{3}} minutes."
+
+export async function sendWhatsAppOtp(params: {
+  phone: string;
+  otpCode: string;
+  platformName: string;
+  expiryMinutes?: number;
+}): Promise<void> {
+  await sendWhatsAppTemplate({
+    to: params.phone,
+    templateName: "otp_code",
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: params.otpCode },
+          { type: "text", text: params.platformName },
+          { type: "text", text: String(params.expiryMinutes ?? 5) },
+        ],
+      },
+    ],
+  });
+}
+```
+
+### WhatsApp Webhook Handler (Delivery Status)
+
+```typescript
+// POST /functions/v1/whatsapp-webhook
+// Handles delivery receipts and inbound "CANCEL" replies from customers
+
+const VERIFY_TOKEN = Deno.env.get("WHATSAPP_WEBHOOK_VERIFY_TOKEN")!;
+
+serve(async (req) => {
+  // GET: Meta webhook verification handshake
+  if (req.method === "GET") {
+    const url    = new URL(req.url);
+    const mode   = url.searchParams.get("hub.mode");
+    const token  = url.searchParams.get("hub.verify_token");
+    const challenge = url.searchParams.get("hub.challenge");
+    if (mode === "subscribe" && token === VERIFY_TOKEN) {
+      return new Response(challenge, { status: 200 });
+    }
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  // POST: incoming event
+  const body = await req.json();
+  const entry = body.entry?.[0];
+  const change = entry?.changes?.[0];
+  const value  = change?.value;
+
+  // Delivery/read status update
+  if (value?.statuses?.length) {
+    for (const status of value.statuses) {
+      // status.id = WhatsApp message ID, status.status = 'sent'|'delivered'|'read'|'failed'
+      await supabase.from("notification_logs").update({
+        delivery_status: status.status,
+        delivered_at: status.status === "delivered" ? new Date().toISOString() : undefined,
+        read_at:      status.status === "read"      ? new Date().toISOString() : undefined,
+      }).eq("provider_message_id", status.id);
+    }
+  }
+
+  // Inbound text message (e.g. customer replies "CANCEL")
+  if (value?.messages?.length) {
+    for (const message of value.messages) {
+      if (message.type === "text") {
+        const text = message.text.body.trim().toUpperCase();
+        const phone = `+${message.from}`;
+        if (text === "CANCEL") {
+          // Find the customer's next upcoming booking and cancel it
+          const { data: customer } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("phone", phone)
+            .maybeSingle();
+          if (customer) {
+            await supabase
+              .from("bookings")
+              .update({ status: "cancelled", cancellation_reason: "customer_whatsapp_cancel" })
+              .eq("customer_id", customer.id)
+              .eq("status", "confirmed")
+              .gte("starts_at", new Date().toISOString())
+              .order("starts_at", { ascending: true })
+              .limit(1);
+          }
+        }
+      }
+    }
+  }
+
+  return new Response("OK", { status: 200 });
+});
+```
+
+Required env vars: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`
+
+**Setup notes**:
+- Register on Meta for Developers → create a WhatsApp Business app → get a test phone number
+- All template messages must be pre-approved by Meta before sending (allow 48–72h for approval)
+- Add `whatsapp_opted_in boolean NOT NULL DEFAULT false` to `profiles` table
+- Send WhatsApp only when `whatsapp_opted_in = true`; fall back to SMS otherwise
+- Nigeria numbers: prefix `234`, Ghana: `233`, Kenya: `254`, Côte d'Ivoire: `225`
+
+---
+
+## Paystack Transfer (Vendor Payout)
+
+Use this pattern to disburse earnings to vendors after a booking completes. Paystack Transfer API sends NGN to a registered bank account. All transfers are idempotent via a stable `reference` derived from the `payouts.id`.
+
+```typescript
+interface InitiatePayoutParams {
+  payoutId:            string;   // payouts.id — used as idempotency reference
+  recipientCode:       string;   // vendor_bank_accounts.paystack_recipient_code
+  amountKobo:          number;
+  reason?:             string;
+}
+
+interface CreateRecipientParams {
+  accountNumber: string;
+  bankCode:      string;
+  accountName:   string;
+  businessId:    string;         // stored in metadata for webhook reconciliation
+}
+
+// Step 1: Register vendor's bank account as a Paystack Transfer Recipient
+export async function createPaystackRecipient(
+  params: CreateRecipientParams
+): Promise<{ recipientCode: string }> {
+  const res = await fetch("https://api.paystack.co/transferrecipient", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${Deno.env.get("PAYSTACK_SECRET_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      type:           "nuban",
+      name:           params.accountName,
+      account_number: params.accountNumber,
+      bank_code:      params.bankCode,
+      currency:       "NGN",
+      metadata:       { business_id: params.businessId },
+    }),
+  });
+  const json = await res.json();
+  if (!json.status) throw new Error(json.message);
+  return { recipientCode: json.data.recipient_code };
+}
+
+// Step 2: Initiate transfer to vendor
+export async function initiateVendorPayout(
+  params: InitiatePayoutParams
+): Promise<{ transferCode: string; transferRef: string }> {
+  const reference = `payout-${params.payoutId}`;  // stable, not Date.now()
+
+  const res = await fetch("https://api.paystack.co/transfer", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${Deno.env.get("PAYSTACK_SECRET_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      source:    "balance",
+      amount:    params.amountKobo,
+      recipient: params.recipientCode,
+      reason:    params.reason ?? "Booking payout",
+      currency:  "NGN",
+      reference,
+    }),
+  });
+  const json = await res.json();
+  if (!json.status) throw new Error(json.message);
+  return {
+    transferCode: json.data.transfer_code,
+    transferRef:  json.data.reference,
+  };
+}
+
+// Step 3: Webhook handler for transfer events (Edge Function: confirm-transfer)
+// Paystack sends transfer.success / transfer.failed / transfer.reversed
+// Verify HMAC-SHA-512 on x-paystack-signature before processing
+export async function handleTransferWebhook(
+  rawBody: string,
+  sig: string,
+  supabase: SupabaseClient
+): Promise<void> {
+  const expected = createHmac("sha512", Deno.env.get("PAYSTACK_SECRET_KEY")!)
+    .update(rawBody).digest("hex");
+  if (sig !== expected) throw new Error("Invalid signature");
+
+  const event = JSON.parse(rawBody);
+  const { reference, transfer_code } = event.data;
+  const payoutId = reference.replace("payout-", "");
+
+  if (event.event === "transfer.success") {
+    await supabase.from("payouts").update({
+      status:       "success",
+      completed_at: new Date().toISOString(),
+    }).eq("id", payoutId);
+
+    await supabase.from("payout_ledger").update({ status: "paid" })
+      .eq("payout_id", payoutId);
+  }
+
+  if (event.event === "transfer.failed") {
+    await supabase.from("payouts").update({
+      status:         "failed",
+      failure_reason: event.data.reason ?? "unknown",
+    }).eq("id", payoutId);
+
+    await supabase.from("payout_ledger").update({ status: "failed" })
+      .eq("payout_id", payoutId);
+  }
+
+  if (event.event === "transfer.reversed") {
+    await supabase.from("payouts").update({ status: "reversed" })
+      .eq("id", payoutId);
+    // Move ledger rows back to 'pending' for retry
+    await supabase.from("payout_ledger").update({ status: "pending", payout_id: null })
+      .eq("payout_id", payoutId);
+  }
+}
+```
+
+Required env vars: `PAYSTACK_SECRET_KEY`
+
+**Setup notes**:
+- Enable Transfer on your Paystack dashboard (Transfers → Settings → Enable transfers)
+- Use `Paystack.verifyAccountNumber` before creating a recipient to validate account details
+- Nigeria: 9-digit NUBAN account numbers; bank codes from `GET https://api.paystack.co/bank`
+- Always use a stable `reference = payout-{uuid}` — never append timestamps
+- Paystack balance must be funded before transfer; monitor via `GET /balance`
