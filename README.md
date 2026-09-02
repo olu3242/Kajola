@@ -128,7 +128,7 @@ kajola/
 │   ├── output-template.md          # Structured output template for all 11 sections
 │   └── api-patterns.md             # Edge Function patterns: HMAC, M-Pesa, AT SMS, offline queue
 ├── evals/
-│   └── evals.json                  # 33 test cases, 363 assertions
+│   └── evals.json                  # 35 test cases, 386 assertions
 ├── supabase/
 │   ├── migrations/                 # Reference migrations (SORF baseline schema)
 │   └── functions/

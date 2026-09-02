@@ -1727,3 +1727,441 @@ Required env vars: `PAYSTACK_SECRET_KEY`
 - Nigeria: 9-digit NUBAN account numbers; bank codes from `GET https://api.paystack.co/bank`
 - Always use a stable `reference = payout-{uuid}` — never append timestamps
 - Paystack balance must be funded before transfer; monitor via `GET /balance`
+
+---
+
+## Validate & Apply Coupon Edge Function (SCOS Engine #33)
+
+```typescript
+// supabase/functions/validate-coupon/index.ts
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+interface CouponRequest {
+  coupon_code: string;
+  booking_id:  string;
+  service_id:  string;
+  order_value_kobo: number;
+}
+
+serve(async (req) => {
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return new Response("Unauthorized", { status: 401 });
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(
+    authHeader.replace("Bearer ", ""),
+  );
+  if (authErr || !user) return new Response("Unauthorized", { status: 401 });
+
+  const body: CouponRequest = await req.json();
+  const { coupon_code, booking_id, service_id, order_value_kobo } = body;
+
+  // 1. Fetch coupon (status=active, not expired)
+  const { data: coupon, error: couponErr } = await supabase
+    .from("coupons")
+    .select("*")
+    .eq("code", coupon_code.trim().toUpperCase())
+    .eq("status", "active")
+    .gt("expires_at", new Date().toISOString())   // NULL expires_at passes this filter too
+    .maybeSingle();
+
+  // Rewrite: expires_at IS NULL OR expires_at > now() — use RPC instead for OR
+  if (couponErr || !coupon) {
+    return Response.json({ valid: false, reason: "coupon_not_found" }, { status: 422 });
+  }
+
+  // 2. Check global usage cap
+  if (coupon.max_uses !== null && coupon.used_count >= coupon.max_uses) {
+    return Response.json({ valid: false, reason: "coupon_exhausted" }, { status: 422 });
+  }
+
+  // 3. Check per-customer usage
+  const { count: customerUses } = await supabase
+    .from("coupon_uses")
+    .select("id", { count: "exact", head: true })
+    .eq("coupon_id", coupon.id)
+    .eq("customer_id", user.id);
+  if ((customerUses ?? 0) >= coupon.max_uses_per_customer) {
+    return Response.json({ valid: false, reason: "already_used" }, { status: 422 });
+  }
+
+  // 4. Check minimum order value
+  if (order_value_kobo < coupon.min_order_value_kobo) {
+    return Response.json({
+      valid: false,
+      reason: "below_minimum",
+      min_order_kobo: coupon.min_order_value_kobo,
+    }, { status: 422 });
+  }
+
+  // 5. Check service restriction
+  const conditions = coupon.conditions ?? {};
+  if (conditions.service_ids?.length && !conditions.service_ids.includes(service_id)) {
+    return Response.json({ valid: false, reason: "service_not_eligible" }, { status: 422 });
+  }
+
+  // 6. Check customer segment restriction
+  if (conditions.first_booking_only) {
+    const { count: prevBookings } = await supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("customer_id", user.id)
+      .eq("status", "completed");
+    if ((prevBookings ?? 0) > 0) {
+      return Response.json({ valid: false, reason: "new_customers_only" }, { status: 422 });
+    }
+  }
+
+  // 7. Compute discount
+  let discount_kobo = 0;
+  if (coupon.discount_type === "percentage") {
+    discount_kobo = Math.round(order_value_kobo * (coupon.discount_value / 100));
+    if (coupon.max_discount_kobo) {
+      discount_kobo = Math.min(discount_kobo, coupon.max_discount_kobo);
+    }
+  } else if (coupon.discount_type === "fixed_amount") {
+    discount_kobo = Math.min(
+      Math.round(coupon.discount_value * 100), // kobo conversion
+      order_value_kobo,
+    );
+  } else if (coupon.discount_type === "free_service") {
+    discount_kobo = order_value_kobo;
+  }
+
+  // 8. Record use + increment counter atomically via RPC
+  const { error: useErr } = await supabase.rpc("apply_coupon", {
+    p_coupon_id:            coupon.id,
+    p_booking_id:           booking_id,
+    p_customer_id:          user.id,
+    p_discount_applied_kobo: discount_kobo,
+  });
+  // apply_coupon() is a Postgres function that INSERTs coupon_uses and
+  // does UPDATE coupons SET used_count = used_count + 1 — both in one transaction
+  if (useErr) {
+    return Response.json({ valid: false, reason: "apply_failed", detail: useErr.message },
+      { status: 409 });
+  }
+
+  return Response.json({
+    valid:          true,
+    discount_kobo,
+    final_amount_kobo: order_value_kobo - discount_kobo,
+    coupon_id:      coupon.id,
+    description:    coupon.description,
+  });
+});
+```
+
+Companion Postgres function for atomic coupon application:
+
+```sql
+CREATE OR REPLACE FUNCTION apply_coupon(
+  p_coupon_id             uuid,
+  p_booking_id            uuid,
+  p_customer_id           uuid,
+  p_discount_applied_kobo bigint
+) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  INSERT INTO coupon_uses (coupon_id, booking_id, customer_id, discount_applied_kobo)
+  VALUES (p_coupon_id, p_booking_id, p_customer_id, p_discount_applied_kobo);
+
+  UPDATE coupons
+  SET used_count = used_count + 1,
+      status = CASE
+        WHEN max_uses IS NOT NULL AND used_count + 1 >= max_uses THEN 'exhausted'
+        ELSE status
+      END,
+      updated_at = now()
+  WHERE id = p_coupon_id;
+END;
+$$;
+```
+
+Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+**Notes**:
+- Coupon code lookup is case-insensitive — always normalise to `UPPER()` before insert
+- `apply_coupon()` runs as SECURITY DEFINER so it bypasses RLS; do all validation checks in the Edge Function before calling it
+- For `expires_at IS NULL OR expires_at > now()` — fetch without the `.gt()` filter and check in application code, or use a Postgres view that encodes the OR
+- Campaign stats (`bookings_generated`, `revenue_kobo`) are updated via a separate pg_cron job aggregating from `coupon_uses JOIN bookings`
+
+---
+
+## AI Concierge Edge Function (SCOS Engine #42)
+
+Streaming Claude-powered booking assistant — handles natural-language slot requests, recommends services, surfaces provider availability, and hands off a pre-filled booking payload.
+
+```typescript
+// supabase/functions/ai-concierge/index.ts
+import { serve }         from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient }  from "https://esm.sh/@supabase/supabase-js@2";
+import Anthropic         from "npm:@anthropic-ai/sdk";
+
+const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY")! });
+
+interface ConversationTurn {
+  role:    "user" | "assistant";
+  content: string;
+}
+
+serve(async (req) => {
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  const { tenant_id, branch_id, messages, locale = "en" }:
+    { tenant_id: string; branch_id?: string; messages: ConversationTurn[]; locale?: string }
+    = await req.json();
+
+  // Load tenant context: services, categories, open hours, active promotions
+  const [{ data: services }, { data: promotions }, { data: tenant }] = await Promise.all([
+    supabase.from("services")
+      .select("id, name, duration_minutes, price_kobo, description, category_id")
+      .eq("tenant_id", tenant_id).eq("is_active", true).limit(60),
+    supabase.from("promotions")
+      .select("name, description, discount_type, discount_value, applies_to")
+      .eq("tenant_id", tenant_id).eq("status", "active").limit(10),
+    supabase.from("tenants").select("name, config").eq("id", tenant_id).single(),
+  ]);
+
+  const currency = (tenant?.config as Record<string, unknown>)?.currency_code ?? "NGN";
+  const serviceList = (services ?? []).map(s =>
+    `• ${s.name} — ${s.duration_minutes} min — ${currency} ${(s.price_kobo / 100).toFixed(2)}`
+  ).join("\n");
+  const promoList = (promotions ?? []).map(p =>
+    `• ${p.name}: ${p.description}`
+  ).join("\n") || "None active";
+
+  const systemPrompt = `You are the AI booking concierge for ${tenant?.name ?? "this business"}.
+Your job is to help customers find the right service, pick an available time, and start their booking.
+
+Available services:
+${serviceList}
+
+Active promotions:
+${promoList}
+
+Instructions:
+- Respond in ${locale === "fr" ? "French" : "English"} unless the customer switches languages.
+- Always confirm the service name, duration, and price before suggesting slots.
+- When you have enough information (service + preferred date/time + staff preference if any),
+  output a JSON block at the END of your message in this exact format (no markdown fences):
+  BOOKING_PAYLOAD:{"service_id":"...","preferred_date":"YYYY-MM-DD","preferred_time":"HH:MM","notes":"..."}
+- Never invent slot availability — tell the customer you'll check and that the booking UI will show real slots.
+- Keep replies concise (under 120 words). Do not list all services unless asked.`;
+
+  const stream = anthropic.messages.stream({
+    model:      "claude-opus-5",
+    max_tokens: 512,
+    system:     systemPrompt,
+    messages:   messages.map(m => ({ role: m.role, content: m.content })),
+  });
+
+  const readable = new ReadableStream({
+    async start(controller) {
+      for await (const chunk of stream) {
+        if (
+          chunk.type === "content_block_delta" &&
+          chunk.delta.type === "text_delta"
+        ) {
+          controller.enqueue(new TextEncoder().encode(chunk.delta.text));
+        }
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type":     "text/plain; charset=utf-8",
+      "Transfer-Encoding": "chunked",
+      "X-Accel-Buffering": "no",
+    },
+  });
+});
+```
+
+Required env vars: `ANTHROPIC_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+**Integration notes**:
+- Parse `BOOKING_PAYLOAD:{...}` from the last assistant message in the frontend to pre-fill the booking sheet
+- Store conversation turns in `ai_concierge_sessions` (session_id, tenant_id, customer_id, messages jsonb, created_at)
+- Rate-limit per customer: max 20 turns / 10 min via a counter in Redis or Supabase key-value
+- Pass `locale` from the customer's browser `navigator.language` or profile preference
+
+---
+
+## AI Business Coach Edge Function (SCOS Engine #43)
+
+Streaming advisory assistant for business owners — analyses their booking data, surfaces revenue opportunities, flags churn risk, and recommends SORF-aware actions.
+
+```typescript
+// supabase/functions/ai-business-coach/index.ts
+import { serve }        from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import Anthropic        from "npm:@anthropic-ai/sdk";
+
+const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY")! });
+
+serve(async (req) => {
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  // Auth: must be owner or admin
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return new Response("Unauthorized", { status: 401 });
+  const { data: { user } } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
+  if (!user) return new Response("Unauthorized", { status: 401 });
+
+  const { tenant_id, question }: { tenant_id: string; question: string } = await req.json();
+
+  // Verify user is owner/admin of this tenant
+  const { data: membership } = await supabase
+    .from("staff_members")
+    .select("role")
+    .eq("tenant_id", tenant_id)
+    .eq("profile_id", user.id)
+    .in("role", ["owner", "admin"])
+    .maybeSingle();
+  if (!membership) return new Response("Forbidden", { status: 403 });
+
+  // Pull live business snapshot (last 30 days)
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const [{ data: summary }, { data: topServices }, { data: churnRisk }] = await Promise.all([
+    supabase.rpc("business_snapshot_30d", { p_tenant_id: tenant_id }),
+    supabase.from("bookings")
+      .select("service_id, services(name), count:id.count(), revenue:total_amount_kobo.sum()")
+      .eq("tenant_id", tenant_id).gte("created_at", since)
+      .eq("status", "completed").limit(5),
+    // Customers with ≥2 completed bookings historically but none in last 60 days
+    supabase.rpc("churn_risk_customers", { p_tenant_id: tenant_id, p_days: 60, p_limit: 5 }),
+  ]);
+
+  const snapshotText = summary ? JSON.stringify(summary, null, 2) : "No data available";
+  const topSvcText = (topServices ?? []).map((s: Record<string, unknown>) =>
+    `  • ${(s.services as Record<string, string>)?.name}: ${s.count} bookings`
+  ).join("\n") || "  None";
+  const churnText = (churnRisk ?? []).map((c: Record<string, unknown>) =>
+    `  • Customer ${c.customer_id} — last seen ${c.last_booking_date}`
+  ).join("\n") || "  None identified";
+
+  const systemPrompt = `You are an AI business coach for African service businesses on the Kajola SCOS platform.
+You have access to this business's last 30-day performance data. Give specific, actionable advice.
+
+BUSINESS SNAPSHOT (last 30 days):
+${snapshotText}
+
+TOP SERVICES BY REVENUE:
+${topSvcText}
+
+CHURN-RISK CUSTOMERS:
+${churnText}
+
+Guidelines:
+- Ground every recommendation in the data provided — no generic advice.
+- When you recommend an action (e.g. run a win-back campaign), specify which Kajola feature enables it.
+- Use local currency context (NGN/KES/GHS). Express revenue in thousands (e.g. ₦1.2M, KES 450K).
+- Limit the response to 3 actionable insights, ordered by impact. Use bullet points.
+- If the data is insufficient to answer confidently, say so and suggest which metric to check.`;
+
+  const stream = anthropic.messages.stream({
+    model:      "claude-opus-5",
+    max_tokens: 600,
+    system:     systemPrompt,
+    messages:   [{ role: "user", content: question }],
+  });
+
+  const readable = new ReadableStream({
+    async start(controller) {
+      for await (const chunk of stream) {
+        if (
+          chunk.type === "content_block_delta" &&
+          chunk.delta.type === "text_delta"
+        ) {
+          controller.enqueue(new TextEncoder().encode(chunk.delta.text));
+        }
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type":     "text/plain; charset=utf-8",
+      "Transfer-Encoding": "chunked",
+      "X-Accel-Buffering": "no",
+    },
+  });
+});
+```
+
+Required env vars: `ANTHROPIC_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+**Companion SQL — business_snapshot_30d RPC:**
+
+```sql
+CREATE OR REPLACE FUNCTION business_snapshot_30d(p_tenant_id uuid)
+RETURNS jsonb LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT jsonb_build_object(
+    'total_bookings',    COUNT(*) FILTER (WHERE status IN ('completed','confirmed','in_progress')),
+    'completed',         COUNT(*) FILTER (WHERE status = 'completed'),
+    'cancelled',         COUNT(*) FILTER (WHERE status = 'cancelled'),
+    'no_show',           COUNT(*) FILTER (WHERE status = 'no_show'),
+    'revenue_kobo',      COALESCE(SUM(total_amount_kobo) FILTER (WHERE status = 'completed'), 0),
+    'avg_order_kobo',    COALESCE(AVG(total_amount_kobo) FILTER (WHERE status = 'completed'), 0),
+    'unique_customers',  COUNT(DISTINCT customer_id) FILTER (WHERE status = 'completed'),
+    'new_customers',     COUNT(DISTINCT customer_id) FILTER (
+                           WHERE status = 'completed'
+                           AND customer_id NOT IN (
+                             SELECT DISTINCT customer_id FROM bookings
+                             WHERE tenant_id = p_tenant_id
+                               AND created_at < now() - interval '30 days'
+                               AND status = 'completed'
+                           )),
+    'cancellation_rate', ROUND(
+                           100.0 * COUNT(*) FILTER (WHERE status = 'cancelled') /
+                           NULLIF(COUNT(*), 0), 1)
+  )
+  FROM bookings
+  WHERE tenant_id = p_tenant_id
+    AND created_at >= now() - interval '30 days';
+$$;
+
+CREATE OR REPLACE FUNCTION churn_risk_customers(
+  p_tenant_id uuid,
+  p_days      integer DEFAULT 60,
+  p_limit     integer DEFAULT 10
+) RETURNS TABLE(customer_id uuid, last_booking_date date, lifetime_bookings bigint)
+LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT
+    customer_id,
+    MAX(created_at)::date AS last_booking_date,
+    COUNT(*)              AS lifetime_bookings
+  FROM bookings
+  WHERE tenant_id = p_tenant_id
+    AND status = 'completed'
+  GROUP BY customer_id
+  HAVING MAX(created_at) < now() - (p_days || ' days')::interval
+     AND COUNT(*) >= 2
+  ORDER BY last_booking_date ASC
+  LIMIT p_limit;
+$$;
+```
+
+**Integration notes**:
+- Expose via the owner/admin dashboard "AI Insights" tab — one question field, streaming response panel
+- Cache responses for identical `(tenant_id, question)` pairs for 1 hour using `ai_coach_cache` table to reduce API costs
+- For the Business Coach, never stream raw customer PII — the churn list shows only `customer_id`; join display names only in the frontend with a separate authenticated query

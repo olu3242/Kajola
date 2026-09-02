@@ -1855,3 +1855,406 @@ CREATE TRIGGER trg_process_referral_reward
   AFTER UPDATE ON bookings
   FOR EACH ROW EXECUTE FUNCTION process_referral_reward();
 ```
+
+---
+
+## Gratuity & Recognition Engine (SCOS Engine #14, #15)
+
+```sql
+-- ── Gratuities (tips — 100% to provider/staff) ──────────────────────────────
+CREATE TABLE gratuities (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES tenants(id),
+  booking_id  uuid NOT NULL REFERENCES bookings(id) UNIQUE,
+  customer_id uuid NOT NULL REFERENCES profiles(id),
+  staff_id    uuid NOT NULL REFERENCES staff_members(id),
+  amount_kobo bigint NOT NULL CHECK (amount_kobo > 0),
+  message     text,
+  paystack_transfer_code text,
+  transferred_at timestamptz,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE gratuities ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "customers read own gratuities"
+  ON gratuities FOR SELECT USING (customer_id = auth.uid());
+CREATE POLICY "customers insert gratuities"
+  ON gratuities FOR INSERT WITH CHECK (customer_id = auth.uid());
+CREATE POLICY "staff read received gratuities"
+  ON gratuities FOR SELECT
+  USING (staff_id IN (
+    SELECT id FROM staff_members WHERE profile_id = auth.uid()));
+
+CREATE INDEX idx_gratuities_booking  ON gratuities(booking_id);
+CREATE INDEX idx_gratuities_staff    ON gratuities(staff_id, created_at DESC);
+CREATE INDEX idx_gratuities_customer ON gratuities(customer_id, created_at DESC);
+
+-- ── Badges ──────────────────────────────────────────────────────────────────
+CREATE TABLE badges (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES tenants(id),
+  name        text NOT NULL,
+  description text,
+  icon_url    text,
+  criteria    jsonb NOT NULL DEFAULT '{}'
+  -- e.g. {"type":"top_10_monthly","metric":"completed_bookings","period":"month"}
+);
+ALTER TABLE badges ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public read badges" ON badges FOR SELECT USING (true);
+
+-- ── Customer Milestones ──────────────────────────────────────────────────────
+CREATE TABLE customer_milestones (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id     uuid NOT NULL REFERENCES profiles(id),
+  tenant_id      uuid NOT NULL REFERENCES tenants(id),
+  milestone_type text NOT NULL,
+  -- e.g. 'first_booking', '5th_booking', '10_bookings', 'vip_upgrade', 'anniversary_1yr'
+  achieved_at    timestamptz NOT NULL DEFAULT now(),
+  metadata       jsonb NOT NULL DEFAULT '{}',
+  UNIQUE (profile_id, milestone_type)
+);
+ALTER TABLE customer_milestones ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users see own milestones"
+  ON customer_milestones FOR SELECT USING (profile_id = auth.uid());
+CREATE POLICY "service role inserts milestones"
+  ON customer_milestones FOR INSERT WITH CHECK (true);
+
+-- ── Recognition Events (staff awards/badges) ─────────────────────────────────
+CREATE TABLE recognition_events (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  staff_id     uuid NOT NULL REFERENCES staff_members(id),
+  tenant_id    uuid NOT NULL REFERENCES tenants(id),
+  badge_id     uuid REFERENCES badges(id),
+  event_type   text NOT NULL,
+  -- e.g. 'top_10_monthly', 'hundred_bookings', 'five_star_streak', 'most_tipped'
+  period_start date NOT NULL,
+  metadata     jsonb NOT NULL DEFAULT '{}',
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (staff_id, event_type, period_start)
+);
+ALTER TABLE recognition_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public read recognition events"
+  ON recognition_events FOR SELECT USING (true);
+CREATE POLICY "service role inserts recognition"
+  ON recognition_events FOR INSERT WITH CHECK (true);
+
+CREATE INDEX idx_recognition_staff  ON recognition_events(staff_id, period_start DESC);
+CREATE INDEX idx_recognition_tenant ON recognition_events(tenant_id, period_start DESC);
+
+-- ── Staff Leaderboard (Materialized View) ────────────────────────────────────
+-- Refresh requires: CREATE UNIQUE INDEX idx_staff_leaderboard_id first
+CREATE MATERIALIZED VIEW staff_leaderboard AS
+SELECT
+  sm.id           AS staff_id,
+  sm.tenant_id,
+  sm.profile_id,
+  p.full_name,
+  COUNT(b.id)     AS completed_bookings,
+  COALESCE(SUM(b.total_amount_kobo), 0)    AS revenue_kobo,
+  COALESCE(SUM(g.amount_kobo), 0)          AS tips_kobo,
+  COALESCE(AVG(r.rating), 0)::numeric(3,2) AS avg_rating,
+  COUNT(DISTINCT r.customer_id)             AS review_count,
+  RANK() OVER (
+    PARTITION BY sm.tenant_id
+    ORDER BY COUNT(b.id) DESC
+  ) AS rank_by_bookings
+FROM staff_members sm
+JOIN profiles p      ON p.id = sm.profile_id
+LEFT JOIN bookings b ON b.staff_id = sm.id AND b.status = 'completed'
+                     AND b.created_at >= now() - interval '30 days'
+LEFT JOIN gratuities g ON g.staff_id = sm.id
+                       AND g.created_at >= now() - interval '30 days'
+LEFT JOIN reviews r  ON r.staff_id = sm.id
+                     AND r.created_at >= now() - interval '30 days'
+GROUP BY sm.id, sm.tenant_id, sm.profile_id, p.full_name
+WITH DATA;
+
+CREATE UNIQUE INDEX idx_staff_leaderboard_id     ON staff_leaderboard(staff_id);
+CREATE INDEX        idx_staff_leaderboard_tenant  ON staff_leaderboard(tenant_id, rank_by_bookings);
+
+-- Refresh daily at 23:00 UTC (00:00 WAT) — CONCURRENTLY requires the unique index above
+SELECT cron.schedule(
+  'refresh-staff-leaderboard',
+  '0 23 * * *',
+  $$REFRESH MATERIALIZED VIEW CONCURRENTLY staff_leaderboard;$$
+);
+```
+
+---
+
+## Community & Relationship Economy Engine (SCOS Engine #16, #17)
+
+```sql
+-- ── Following (customers follow providers) ───────────────────────────────────
+CREATE TABLE following (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES tenants(id),
+  follower_id uuid NOT NULL REFERENCES profiles(id),
+  provider_id uuid NOT NULL REFERENCES profiles(id),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (follower_id, provider_id)
+);
+ALTER TABLE following ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public read following count"   ON following FOR SELECT USING (true);
+CREATE POLICY "users manage own follows"
+  ON following FOR ALL USING (follower_id = auth.uid());
+
+CREATE INDEX idx_following_provider ON following(provider_id, created_at DESC);
+CREATE INDEX idx_following_follower ON following(follower_id, created_at DESC);
+
+-- ── Community Posts ──────────────────────────────────────────────────────────
+CREATE TABLE community_posts (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES tenants(id),
+  author_id   uuid NOT NULL REFERENCES profiles(id),
+  content     text NOT NULL,
+  media_urls  text[] NOT NULL DEFAULT '{}',
+  post_type   text NOT NULL DEFAULT 'update'
+              CHECK (post_type IN ('update','tip','showcase','offer','event')),
+  status      text NOT NULL DEFAULT 'published'
+              CHECK (status IN ('draft','published','archived')),
+  likes_count integer NOT NULL DEFAULT 0,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE community_posts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public read published posts"
+  ON community_posts FOR SELECT USING (status = 'published');
+CREATE POLICY "providers manage own posts"
+  ON community_posts FOR ALL USING (author_id = auth.uid());
+
+CREATE INDEX idx_posts_author  ON community_posts(author_id, created_at DESC);
+CREATE INDEX idx_posts_tenant  ON community_posts(tenant_id, created_at DESC)
+  WHERE status = 'published';
+
+-- ── Customer-Provider Relationship Score ─────────────────────────────────────
+CREATE TABLE customer_provider_relationships (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id          uuid NOT NULL REFERENCES tenants(id),
+  customer_id        uuid NOT NULL REFERENCES profiles(id),
+  provider_id        uuid NOT NULL REFERENCES profiles(id),
+  booking_count      integer NOT NULL DEFAULT 0,
+  completed_count    integer NOT NULL DEFAULT 0,
+  total_spend_kobo   bigint NOT NULL DEFAULT 0,
+  last_booking_at    timestamptz,
+  relationship_score integer NOT NULL DEFAULT 0
+                     CHECK (relationship_score BETWEEN 0 AND 100),
+  updated_at         timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (customer_id, provider_id)
+);
+ALTER TABLE customer_provider_relationships ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "customers see own relationships"
+  ON customer_provider_relationships FOR SELECT
+  USING (customer_id = auth.uid());
+CREATE POLICY "providers see their customer relationships"
+  ON customer_provider_relationships FOR SELECT
+  USING (provider_id = auth.uid());
+
+CREATE INDEX idx_cpr_provider ON customer_provider_relationships(provider_id, relationship_score DESC);
+CREATE INDEX idx_cpr_customer ON customer_provider_relationships(customer_id, last_booking_at DESC);
+
+-- Update relationship score when booking completes
+CREATE OR REPLACE FUNCTION update_relationship_score() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_score integer;
+BEGIN
+  IF NEW.status = 'completed' AND OLD.status != 'completed' THEN
+    INSERT INTO customer_provider_relationships (
+      tenant_id, customer_id, provider_id,
+      booking_count, completed_count, total_spend_kobo, last_booking_at
+    )
+    VALUES (
+      NEW.tenant_id, NEW.customer_id, NEW.provider_id,
+      1, 1, COALESCE(NEW.total_amount_kobo, 0), NEW.updated_at
+    )
+    ON CONFLICT (customer_id, provider_id) DO UPDATE SET
+      booking_count    = customer_provider_relationships.booking_count + 1,
+      completed_count  = customer_provider_relationships.completed_count + 1,
+      total_spend_kobo = customer_provider_relationships.total_spend_kobo + COALESCE(NEW.total_amount_kobo, 0),
+      last_booking_at  = NEW.updated_at,
+      -- Simplified score: completed_count * 5 capped at 100
+      relationship_score = LEAST(100, (customer_provider_relationships.completed_count + 1) * 5),
+      updated_at       = now();
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_update_relationship_score
+  AFTER UPDATE ON bookings
+  FOR EACH ROW EXECUTE FUNCTION update_relationship_score();
+```
+
+---
+
+## Campaign, Promotions & Coupon Engine (SCOS Engine #31, #32, #33)
+
+```sql
+-- ── Campaigns (#31) ─────────────────────────────────────────────────────────
+CREATE TABLE campaigns (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id        uuid NOT NULL REFERENCES tenants(id),
+  branch_id        uuid REFERENCES branches(id),          -- NULL = all branches
+  name             text NOT NULL,
+  campaign_type    text NOT NULL CHECK (campaign_type IN (
+                     'promotional_blast', 'win_back', 'loyalty_boost',
+                     'referral_drive', 'seasonal', 'new_service_launch')),
+  status           text NOT NULL DEFAULT 'draft' CHECK (status IN (
+                     'draft', 'scheduled', 'active', 'paused', 'completed', 'cancelled')),
+  target_segments  jsonb NOT NULL DEFAULT '[]',
+  channels         text[] NOT NULL DEFAULT '{sms,whatsapp}',
+  message_template text,
+  budget_kobo      bigint NOT NULL DEFAULT 0,
+  spend_kobo       bigint NOT NULL DEFAULT 0,
+  starts_at        timestamptz NOT NULL,
+  ends_at          timestamptz NOT NULL,
+  send_at          timestamptz,
+  stats            jsonb NOT NULL DEFAULT '{
+    "sent":0,"delivered":0,"opened":0,"clicked":0,
+    "bookings_generated":0,"revenue_kobo":0}'::jsonb,
+  created_by       uuid REFERENCES profiles(id),
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT campaigns_dates_check CHECK (ends_at > starts_at),
+  CONSTRAINT campaigns_budget_check CHECK (budget_kobo >= 0)
+);
+
+ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant members read campaigns"
+  ON campaigns FOR SELECT
+  USING (tenant_id IN (
+    SELECT tenant_id FROM staff_members WHERE profile_id = auth.uid()));
+CREATE POLICY "managers write campaigns"
+  ON campaigns FOR ALL
+  USING (tenant_id IN (
+    SELECT tenant_id FROM staff_members
+    WHERE profile_id = auth.uid() AND role IN ('owner','admin','manager')));
+
+CREATE INDEX idx_campaigns_tenant_status ON campaigns(tenant_id, status);
+CREATE INDEX idx_campaigns_send_at ON campaigns(send_at) WHERE status = 'scheduled';
+
+-- ── Promotions (#32) ────────────────────────────────────────────────────────
+CREATE TABLE promotions (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES tenants(id),
+  campaign_id           uuid REFERENCES campaigns(id),
+  name                  text NOT NULL,
+  description           text,
+  discount_type         text NOT NULL CHECK (discount_type IN (
+                          'percentage', 'fixed_amount', 'free_service', 'bogo')),
+  discount_value        numeric(10,2) NOT NULL DEFAULT 0,
+  min_booking_value_kobo bigint NOT NULL DEFAULT 0,
+  max_discount_kobo     bigint,
+  applies_to            text NOT NULL DEFAULT 'all' CHECK (applies_to IN (
+                          'all', 'new_customers', 'returning', 'vip', 'lapsed')),
+  service_ids           uuid[],
+  category_ids          uuid[],
+  day_of_week_mask      integer NOT NULL DEFAULT 127,
+  time_window_start     time,
+  time_window_end       time,
+  max_uses              integer,
+  used_count            integer NOT NULL DEFAULT 0,
+  max_uses_per_customer integer NOT NULL DEFAULT 1,
+  stackable             boolean NOT NULL DEFAULT false,
+  status                text NOT NULL DEFAULT 'active' CHECK (status IN (
+                          'draft','active','paused','expired','archived')),
+  starts_at             timestamptz NOT NULL DEFAULT now(),
+  ends_at               timestamptz,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE promotions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public read active promotions"
+  ON promotions FOR SELECT
+  USING (status = 'active' AND (ends_at IS NULL OR ends_at > now()));
+CREATE POLICY "managers write promotions"
+  ON promotions FOR ALL
+  USING (tenant_id IN (
+    SELECT tenant_id FROM staff_members
+    WHERE profile_id = auth.uid() AND role IN ('owner','admin','manager')));
+
+CREATE INDEX idx_promotions_tenant_active ON promotions(tenant_id, status) WHERE status = 'active';
+CREATE INDEX idx_promotions_campaign ON promotions(campaign_id);
+
+-- ── Coupons (#33) ───────────────────────────────────────────────────────────
+CREATE TABLE coupons (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES tenants(id),
+  campaign_id           uuid REFERENCES campaigns(id),
+  code                  text NOT NULL,
+  description           text,
+  discount_type         text NOT NULL CHECK (discount_type IN (
+                          'percentage', 'fixed_amount', 'free_service')),
+  discount_value        numeric(10,2) NOT NULL,
+  min_order_value_kobo  bigint NOT NULL DEFAULT 0,
+  max_discount_kobo     bigint,
+  conditions            jsonb NOT NULL DEFAULT '{}',
+  max_uses              integer,
+  used_count            integer NOT NULL DEFAULT 0,
+  max_uses_per_customer integer NOT NULL DEFAULT 1,
+  is_single_use         boolean NOT NULL DEFAULT false,
+  stackable             boolean NOT NULL DEFAULT false,
+  status                text NOT NULL DEFAULT 'active' CHECK (status IN (
+                          'active','paused','exhausted','expired','revoked')),
+  starts_at             timestamptz NOT NULL DEFAULT now(),
+  expires_at            timestamptz,
+  created_by            uuid REFERENCES profiles(id),
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, code)
+);
+
+ALTER TABLE coupons ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "validate coupon by code (anon + auth)"
+  ON coupons FOR SELECT USING (true);
+CREATE POLICY "managers write coupons"
+  ON coupons FOR ALL
+  USING (tenant_id IN (
+    SELECT tenant_id FROM staff_members
+    WHERE profile_id = auth.uid() AND role IN ('owner','admin','manager')));
+
+CREATE INDEX idx_coupons_code     ON coupons(tenant_id, code) WHERE status = 'active';
+CREATE INDEX idx_coupons_campaign ON coupons(campaign_id);
+
+-- ── Coupon Uses (idempotency) ────────────────────────────────────────────────
+CREATE TABLE coupon_uses (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coupon_id   uuid NOT NULL REFERENCES coupons(id),
+  booking_id  uuid NOT NULL REFERENCES bookings(id),
+  customer_id uuid NOT NULL REFERENCES profiles(id),
+  discount_applied_kobo bigint NOT NULL,
+  used_at     timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (coupon_id, booking_id)
+);
+
+ALTER TABLE coupon_uses ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "customers see own coupon uses"
+  ON coupon_uses FOR SELECT USING (customer_id = auth.uid());
+CREATE POLICY "service role inserts coupon uses"
+  ON coupon_uses FOR INSERT WITH CHECK (true);
+
+CREATE INDEX idx_coupon_uses_coupon   ON coupon_uses(coupon_id, used_at DESC);
+CREATE INDEX idx_coupon_uses_customer ON coupon_uses(customer_id, coupon_id);
+
+-- Atomic coupon application (called from validate-coupon Edge Function)
+CREATE OR REPLACE FUNCTION apply_coupon(
+  p_coupon_id             uuid,
+  p_booking_id            uuid,
+  p_customer_id           uuid,
+  p_discount_applied_kobo bigint
+) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  INSERT INTO coupon_uses (coupon_id, booking_id, customer_id, discount_applied_kobo)
+  VALUES (p_coupon_id, p_booking_id, p_customer_id, p_discount_applied_kobo);
+
+  UPDATE coupons
+  SET used_count = used_count + 1,
+      status = CASE
+        WHEN max_uses IS NOT NULL AND used_count + 1 >= max_uses THEN 'exhausted'
+        ELSE status
+      END,
+      updated_at = now()
+  WHERE id = p_coupon_id;
+END;
+$$;
+```

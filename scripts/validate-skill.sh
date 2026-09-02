@@ -229,10 +229,10 @@ fi
 
 # At least 14 cases
 CASE_COUNT=$(python3 -c "import json; d=json.load(open('evals/evals.json')); print(len(d.get('cases',[])))" 2>/dev/null || echo "0")
-if [[ "$CASE_COUNT" -ge 31 ]]; then
-  check "evals.json has at least 31 cases (found $CASE_COUNT)" "pass"
+if [[ "$CASE_COUNT" -ge 35 ]]; then
+  check "evals.json has at least 35 cases (found $CASE_COUNT)" "pass"
 else
-  check "evals.json has at least 31 cases" "fail" "found $CASE_COUNT"
+  check "evals.json has at least 35 cases" "fail" "found $CASE_COUNT"
 fi
 
 # Every case has assertions
@@ -254,10 +254,10 @@ import json
 d = json.load(open('evals/evals.json'))
 print(sum(len(c.get('assertions',[])) for c in d.get('cases',[])))
 " 2>/dev/null || echo "0")
-if [[ "$ASSERTION_COUNT" -ge 363 ]]; then
-  check "evals.json has at least 363 assertions (found $ASSERTION_COUNT)" "pass"
+if [[ "$ASSERTION_COUNT" -ge 385 ]]; then
+  check "evals.json has at least 385 assertions (found $ASSERTION_COUNT)" "pass"
 else
-  check "evals.json has at least 363 assertions" "fail" "found $ASSERTION_COUNT"
+  check "evals.json has at least 385 assertions" "fail" "found $ASSERTION_COUNT"
 fi
 
 # Scoring block present

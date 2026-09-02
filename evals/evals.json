@@ -2039,11 +2039,143 @@
         {"id": "e033-11", "description": "Section 13 — WRF Certification checklist", "check": "Section 13|SECTION 13|WRF Certification"},
         {"id": "e033-12", "description": "staff_leaderboard materialized view for recognition", "check": "staff_leaderboard|recognition.*badge|gratuity.*recogni"}
       ]
+    },
+    {
+      "id": "eval-034",
+      "name": "Campaign, Promotions & Coupon Engine — win-back campaign with coupon codes",
+      "prompt": "Build a nail salon platform in Lagos, Nigeria. It has 3 locations. We run seasonal promotions and win-back campaigns. Customers can enter coupon codes at checkout for discounts. Staff get tipped and ranked on a leaderboard. Use Paystack and Termii.",
+      "expected_sections": [1,2,3,4,5,6,7,8,9,10,11],
+      "assertions": [
+        {
+          "id": "e034-01",
+          "description": "campaigns table with status and target_segments",
+          "check": "campaigns.*status|campaign_type.*promotional|target_segments"
+        },
+        {
+          "id": "e034-02",
+          "description": "promotions table with discount_type",
+          "check": "promotions.*discount_type|discount_type.*percentage|discount_type.*fixed"
+        },
+        {
+          "id": "e034-03",
+          "description": "coupons table with code UNIQUE and max_uses",
+          "check": "coupons.*UNIQUE.*code|code.*UNIQUE|max_uses.*used_count"
+        },
+        {
+          "id": "e034-04",
+          "description": "coupon_uses table for idempotency",
+          "check": "coupon_uses|coupon.*uses.*idempoten|UNIQUE.*coupon_id.*booking_id"
+        },
+        {
+          "id": "e034-05",
+          "description": "validate-coupon Edge Function or validate_and_apply_coupon pattern",
+          "check": "validate.*coupon|apply_coupon|coupon.*validation"
+        },
+        {
+          "id": "e034-06",
+          "description": "win-back campaign targeting lapsed customers",
+          "check": "win.back|win_back|lapsed.*customer|re.engag"
+        },
+        {
+          "id": "e034-07",
+          "description": "gratuities table with booking_id and staff_id",
+          "check": "gratuities.*staff_id|gratuities.*booking_id|tip.*staff"
+        },
+        {
+          "id": "e034-08",
+          "description": "staff_leaderboard materialized view",
+          "check": "staff_leaderboard|MATERIALIZED VIEW.*staff|leaderboard.*rank"
+        },
+        {
+          "id": "e034-09",
+          "description": "RLS on campaigns/coupons/promotions tables",
+          "check": "ENABLE ROW LEVEL SECURITY.*campaign|ROW LEVEL SECURITY.*coupon|campaigns.*RLS"
+        },
+        {
+          "id": "e034-10",
+          "description": "Campaign sends via Termii SMS",
+          "check": "Termii.*campaign|campaign.*SMS.*Termii|campaign.*blast.*Termii"
+        },
+        {
+          "id": "e034-11",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "X%", "your_value_here", "₦X,000", "add more"]
+        }
+      ]
+    },
+    {
+      "id": "eval-035",
+      "name": "AI Concierge & Business Coach — streaming Claude patterns in Edge Functions",
+      "prompt": "Create a multi-city fitness and wellness platform in Nigeria (Lagos and Abuja). Customers should be able to book via a WhatsApp-style AI chat assistant. Business owners should have an AI advisor that analyses their booking data and recommends actions. Use Paystack and Africa's Talking.",
+      "expected_sections": [1,2,3,4,5,6,7,8,9,10,11],
+      "assertions": [
+        {
+          "id": "e035-01",
+          "description": "AI Concierge Edge Function or pattern with streaming Claude",
+          "check": "ai.concierge|AI Concierge|concierge.*Edge Function|streaming.*Claude.*booking"
+        },
+        {
+          "id": "e035-02",
+          "description": "BOOKING_PAYLOAD output format in concierge response",
+          "check": "BOOKING_PAYLOAD|booking_payload|pre.fill.*booking"
+        },
+        {
+          "id": "e035-03",
+          "description": "AI Business Coach Edge Function or pattern",
+          "check": "AI Business Coach|ai.business.coach|business.*coach.*Claude|coach.*Edge Function"
+        },
+        {
+          "id": "e035-04",
+          "description": "business_snapshot_30d RPC or equivalent analytics query",
+          "check": "business_snapshot|snapshot.*30.*day|revenue.*last.*30|booking.*summary.*30"
+        },
+        {
+          "id": "e035-05",
+          "description": "churn_risk_customers RPC or lapsed customer query",
+          "check": "churn.*risk|lapsed.*customer.*query|churn_risk_customers|customers.*silent.*60"
+        },
+        {
+          "id": "e035-06",
+          "description": "RBAC guard on AI Coach — owner/admin only",
+          "check": "owner.*admin.*coach|coach.*role.*owner|staff_members.*role.*owner.*admin"
+        },
+        {
+          "id": "e035-07",
+          "description": "Streaming response via ReadableStream or Transfer-Encoding: chunked",
+          "check": "ReadableStream|Transfer-Encoding.*chunked|text/plain.*stream|stream.*chunk"
+        },
+        {
+          "id": "e035-08",
+          "description": "ANTHROPIC_API_KEY is server-only — not in client code",
+          "check": "ANTHROPIC_API_KEY.*server|server.only.*ANTHROPIC|never.*expose.*API.*key",
+          "must_not_contain": ["NEXT_PUBLIC_ANTHROPIC", "process.env.NEXT_PUBLIC_ANTHROPIC"]
+        },
+        {
+          "id": "e035-09",
+          "description": "ai_concierge_sessions table or equivalent conversation store",
+          "check": "ai_concierge_sessions|concierge.*session|conversation.*store.*tenant"
+        },
+        {
+          "id": "e035-10",
+          "description": "Africa's Talking integration for SMS/USSD fallback",
+          "check": "Africa.*Talking|africas.*talking|AfricasTalking"
+        },
+        {
+          "id": "e035-11",
+          "description": "customer_provider_relationships table (Relationship Economy)",
+          "check": "customer_provider_relationships|relationship_score|relationship.*economy"
+        },
+        {
+          "id": "e035-12",
+          "description": "No placeholder text",
+          "must_not_contain": ["TBD", "TODO", "X%", "your_value_here", "add more columns"]
+        }
+      ]
     }
   ],
   "scoring": {
     "method": "assertion_pass_rate",
     "pass_threshold": 0.85,
-    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 33 cases pass. Target: 33 cases, 363 assertions."
+    "notes": "A case passes if 85% or more of its assertions pass. The skill passes overall if all 35 cases pass. Target: 35 cases, 386 assertions."
   }
 }
