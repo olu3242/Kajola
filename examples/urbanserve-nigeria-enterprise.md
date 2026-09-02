@@ -156,6 +156,44 @@ CREATE TABLE availability_overrides (
   UNIQUE (staff_id, branch_id, override_date)
 );
 
+-- Waitlist
+CREATE TABLE waitlist_entries (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES tenants(id),
+  branch_id   uuid NOT NULL REFERENCES branches(id),
+  service_id  uuid NOT NULL REFERENCES services(id),
+  customer_id uuid NOT NULL REFERENCES profiles(id),
+  preferred_date date NOT NULL,
+  status      text NOT NULL DEFAULT 'waiting'
+              CHECK (status IN ('waiting','notified','booked','expired')),
+  notified_at timestamptz,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (customer_id, service_id, preferred_date)
+);
+ALTER TABLE waitlist_entries ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "customers read own waitlist"
+  ON waitlist_entries FOR SELECT USING (customer_id = auth.uid());
+CREATE POLICY "customers join waitlist"
+  ON waitlist_entries FOR INSERT WITH CHECK (customer_id = auth.uid());
+
+-- Waitlist notification trigger: fires when a booking is cancelled or no_show
+CREATE OR REPLACE FUNCTION notify_waitlist() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.status IN ('cancelled','no_show') AND OLD.status NOT IN ('cancelled','no_show') THEN
+    INSERT INTO automation_jobs (tenant_id, job_type, payload, run_at)
+    SELECT NEW.tenant_id, 'notify_waitlist',
+           jsonb_build_object('service_id', NEW.service_id, 'slot_date', NEW.starts_at::date),
+           now()
+    WHERE EXISTS (
+      SELECT 1 FROM waitlist_entries
+      WHERE service_id = NEW.service_id AND status = 'waiting'
+        AND preferred_date = NEW.starts_at::date);
+  END IF;
+  RETURN NEW;
+END;$$;
+CREATE TRIGGER trg_notify_waitlist
+  AFTER UPDATE ON bookings FOR EACH ROW EXECUTE FUNCTION notify_waitlist();
+
 -- Bookings (SORF 9-state lifecycle)
 CREATE TABLE bookings (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -297,6 +335,72 @@ SELECT cron.schedule(
   '0 23 * * *',
   $$REFRESH MATERIALIZED VIEW CONCURRENTLY staff_leaderboard;$$
 );
+
+-- ── Loyalty Engine (#13) ────────────────────────────────────────────────────
+CREATE TABLE loyalty_accounts (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES tenants(id),
+  profile_id    uuid NOT NULL REFERENCES profiles(id),
+  tier          text NOT NULL DEFAULT 'standard'
+                CHECK (tier IN ('standard','silver','gold','platinum')),
+  points_balance integer NOT NULL DEFAULT 0,
+  lifetime_points integer NOT NULL DEFAULT 0,
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, profile_id)
+);
+ALTER TABLE loyalty_accounts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users read own loyalty"
+  ON loyalty_accounts FOR SELECT USING (profile_id = auth.uid());
+
+CREATE TABLE loyalty_transactions (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES tenants(id),
+  account_id    uuid NOT NULL REFERENCES loyalty_accounts(id),
+  booking_id    uuid REFERENCES bookings(id),
+  txn_type      text NOT NULL CHECK (txn_type IN ('earn','redeem','expire','adjust')),
+  points        integer NOT NULL,
+  balance_after integer NOT NULL,
+  description   text,
+  idempotency_key uuid UNIQUE,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE loyalty_transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users read own loyalty transactions"
+  ON loyalty_transactions FOR SELECT
+  USING (account_id IN (
+    SELECT id FROM loyalty_accounts WHERE profile_id = auth.uid()));
+
+-- Branch KPI materialized view (refreshed daily)
+CREATE MATERIALIZED VIEW branch_kpis AS
+SELECT
+  b.tenant_id,
+  b.branch_id,
+  date_trunc('day', b.created_at) AS kpi_date,
+  COUNT(*)                                    AS total_bookings,
+  COUNT(*) FILTER (WHERE b.status = 'completed')   AS completed_bookings,
+  COUNT(*) FILTER (WHERE b.status = 'cancelled')   AS cancelled_bookings,
+  COUNT(*) FILTER (WHERE b.status = 'no_show')     AS no_shows,
+  COALESCE(SUM(b.total_amount_kobo) FILTER (WHERE b.status = 'completed'), 0) AS revenue_kobo,
+  COALESCE(AVG(r.rating) FILTER (WHERE r.rating IS NOT NULL), 0)::numeric(3,2) AS avg_rating
+FROM bookings b
+LEFT JOIN reviews r ON r.booking_id = b.id
+GROUP BY b.tenant_id, b.branch_id, date_trunc('day', b.created_at)
+WITH DATA;
+
+CREATE UNIQUE INDEX idx_branch_kpis ON branch_kpis(tenant_id, branch_id, kpi_date);
+
+SELECT cron.schedule(
+  'refresh-branch-kpis',
+  '30 23 * * *',
+  $$REFRESH MATERIALIZED VIEW CONCURRENTLY branch_kpis;$$
+);
+
+-- Helper: resolve current user's tenant_id (used in RLS policies)
+CREATE OR REPLACE FUNCTION current_user_tenant_id() RETURNS uuid
+  LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+  SELECT tenant_id FROM staff_members WHERE profile_id = auth.uid() LIMIT 1;
+$$;
 
 -- ── Community & Relationship Economy (#16, #17) ──────────────────────────────
 CREATE TABLE following (
@@ -511,7 +615,7 @@ WHERE b.id = $1;
 | `win_back_offer` | Campaign: lapsed 60d | customer_name, promo_code, discount |
 | `milestone_achieved` | Milestone trigger | customer_name, milestone, reward |
 
-### Termii SMS Fallback
+### Termii SMS Fallback (TERMII_API_KEY)
 
 - OTP delivery for phone auth
 - Booking confirmation SMS when WhatsApp not opted-in
@@ -800,7 +904,7 @@ All Edge Functions deployed on UrbanServe satisfy the 8 WRF requirements:
 
 ---
 
-## Assumptions
+## Assumptions Made
 
 1. All prices shown in NGN; kobo stored in DB (×100)
 2. `SUPABASE_SERVICE_ROLE_KEY` and `ANTHROPIC_API_KEY` are server-only secrets — never in `NEXT_PUBLIC_` vars or client bundles
