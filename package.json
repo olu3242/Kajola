@@ -6,14 +6,18 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "migrations:validate": "pwsh ./scripts/migrations/validate.ps1",
     "migrations:drift": "pwsh ./scripts/migrations/check-drift.ps1",
     "migrations:deploy": "pwsh ./scripts/migrations/deploy.ps1"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^1.6.1",
+    "prettier": "^3.0.0",
     "turbo": "^1.10.2",
     "typescript": "^5.5.4",
-    "prettier": "^3.0.0"
+    "vitest": "^1.6.1"
   },
   "workspaces": [
     "apps/*",
