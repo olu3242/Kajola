@@ -149,14 +149,17 @@ export class WorkflowRunner {
   }
 
   private async executeSteps(run: WorkflowRun, steps: WorkflowStepDefinition[]) {
+    let skipNext = false;
     for (const step of steps) {
-      await this.executeStep(run, step);
+      if (skipNext) { skipNext = false; continue; }
+      const signal = await this.executeStep(run, step);
+      if (signal === 'skip_next') { skipNext = true; continue; }
       const updated = await this.repo.getRun(run.runId);
       if (updated?.status === 'failed' || updated?.status === 'cancelled') break;
     }
   }
 
-  private async executeStep(run: WorkflowRun, step: WorkflowStepDefinition): Promise<void> {
+  private async executeStep(run: WorkflowRun, step: WorkflowStepDefinition): Promise<'skip_next' | void> {
     const stepRunId = newStepRunId();
     const sr: StepRun = {
       id:        stepRunId,
@@ -187,6 +190,15 @@ export class WorkflowRunner {
         }
         return;
       } catch (err: unknown) {
+        // Condition gate closed (false + onFailure:'skip') → complete step, skip next
+        if (err instanceof Error && (err as Error & { __gateClosed?: boolean }).__gateClosed) {
+          sr.status  = 'completed';
+          sr.output  = { conditionPassed: false };
+          sr.endedAt = new Date().toISOString();
+          await this.repo.updateStepRun(stepRunId, sr);
+          return 'skip_next';
+        }
+
         const msg = err instanceof Error ? err.message : String(err);
         sr.error   = msg;
 
@@ -266,8 +278,9 @@ export class WorkflowRunner {
       case 'condition': {
         if (!step.condition) return {};
         const pass = step.condition(run);
-        if (!pass && step.onFailure === 'skip') return {};
-        return { conditionPassed: pass };
+        if (!pass && step.onFailure === 'skip') throw Object.assign(new Error('ConditionGateClosed'), { __gateClosed: true });
+        if (!pass) throw new Error(`Condition '${step.id}' not satisfied`);
+        return { conditionPassed: true };
       }
 
       case 'timer': {
