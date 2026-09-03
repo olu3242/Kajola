@@ -37,7 +37,7 @@ export default function ArtisanDashboardPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0 }}>Provider Dashboard</h1>
         <div style={{ display: 'flex', gap: 16 }}>
-          <a href="/artisan/workspace" style={{ color: '#2563eb', fontWeight: 600 }}>Today's workspace →</a>
+          <a href="/artisan/workspace" style={{ color: '#2563eb', fontWeight: 600 }}>Today&apos;s workspace →</a>
           <a href="/logout" style={{ color: '#ef4444' }}>Log out</a>
         </div>
       </div>
