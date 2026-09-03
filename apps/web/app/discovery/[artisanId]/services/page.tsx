@@ -1,37 +1,51 @@
-import Link from 'next/link';
+'use client';
 
-async function fetchServices(artisanId: string) {
-  const response = await fetch(`/api/services?artisan_id=${artisanId}`);
-  return response.json();
-}
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
 
-export default async function ServicesPage({ params }: { params: { artisanId: string } }) {
-  const data = await fetchServices(params.artisanId);
-  const services = data.services ?? [];
+type Service = { id: string; name: string; duration_minutes: number; price_kobo: number; };
+
+export default function ServicesPage() {
+  const params     = useParams<{ artisanId: string }>();
+  const artisanId  = params?.artisanId ?? '';
+  const [services, setServices] = useState<Service[]>([]);
+  const [loading,  setLoading]  = useState(true);
+
+  useEffect(() => {
+    if (!artisanId) return;
+    fetch(`/api/artisans/${artisanId}/services`)
+      .then((r) => r.json())
+      .then((d) => { setServices(d.services ?? []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [artisanId]);
 
   return (
-    <main style={{ padding: 32, fontFamily: 'system-ui, sans-serif', maxWidth: 960, margin: '0 auto' }}>
-      <h1>Services</h1>
-      <p style={{ marginTop: 12, color: '#4B5563' }}>
-        Select a service to view available appointment slots.
-      </p>
-      <div style={{ display: 'grid', gap: 16, marginTop: 24 }}>
-        {services.length === 0 ? (
-          <p>No services available yet.</p>
-        ) : (
-          services.map((service: any) => (
-            <Link
-              key={service.id}
-              href={`/discovery/${params.artisanId}/services/${service.id}/slots`}
-              style={{ padding: 20, borderRadius: 16, background: '#F8FAFC', border: '1px solid #E5E7EB', textDecoration: 'none', color: '#111827' }}
+    <main style={{ padding: 32, fontFamily: 'system-ui, sans-serif', maxWidth: 700, margin: '0 auto' }}>
+      <a href={`/discovery/${artisanId}`} style={{ color: '#2563eb', fontSize: 14 }}>← Provider profile</a>
+      <h1 style={{ marginTop: 16 }}>Choose a service</h1>
+
+      {loading ? <p>Loading…</p> : services.length === 0 ? <p>No services listed yet.</p> : (
+        <div style={{ display: 'grid', gap: 14, marginTop: 20 }}>
+          {services.map((s) => (
+            <a
+              key={s.id}
+              href={`/discovery/${artisanId}/services/${s.id}/slots`}
+              data-testid={`service-card-${s.id}`}
+              style={{
+                display: 'block', padding: 20, borderRadius: 12,
+                background: '#F8FAFC', border: '1px solid #E5E7EB',
+                textDecoration: 'none', color: '#111827',
+              }}
             >
-              <h2 style={{ margin: 0 }}>{service.name}</h2>
-              <p style={{ margin: '8px 0 0', color: '#6B7280' }}>{service.description || service.category}</p>
-              <p style={{ marginTop: 8, color: '#4B5563' }}>NGN {Number(service.price_cents) / 100} • {service.duration_minutes} mins</p>
-            </Link>
-          ))
-        )}
-      </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <h3 style={{ margin: 0 }}>{s.name}</h3>
+                <span style={{ fontWeight: 700 }}>₦{(s.price_kobo / 100).toLocaleString()}</span>
+              </div>
+              <p style={{ margin: '6px 0 0', color: '#6B7280', fontSize: 14 }}>{s.duration_minutes} min</p>
+            </a>
+          ))}
+        </div>
+      )}
     </main>
   );
 }

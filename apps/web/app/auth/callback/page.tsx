@@ -10,7 +10,7 @@ export default function AuthCallbackPage() {
 
   useEffect(() => {
     async function handleRedirect() {
-      const { data, error } = await supabase.auth.getSession();
+      const { data, error } = await supabase!.auth.getSession();
       if (error || !data.session) {
         setMessage(error?.message ?? 'Unable to complete Google sign-in.');
         return;

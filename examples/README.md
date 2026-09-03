@@ -247,6 +247,41 @@ What's inside:
 
 ---
 
+### [`hairbook-nigeria.md`](./hairbook-nigeria.md)
+
+**Markets**: Nigeria (NGN) · **Payments**: Paystack · **Auth**: Phone OTP (Termii) · **Comms**: WhatsApp Business API + Termii SMS · **Vertical**: Two-sided beauty marketplace
+
+What's inside:
+- Two-sided marketplace: consumers discover and book stylists; stylists manage schedules, portfolios, and earnings
+- `provider_profiles`: `slug text UNIQUE`, `search_vector tsvector GENERATED ALWAYS AS`, `location geography(POINT,4326)`, `avg_rating`, `portfolio_count`; full-text + PostGIS geo-search endpoint
+- `portfolio_photos`: `thumbnail_path`, `is_featured`, `sort_order`; `sync_portfolio_count()` trigger maintains `provider_profiles.portfolio_count` on INSERT/DELETE
+- `commission_settings` + `staff_earnings`: 60% stylist / 40% platform commission model; `record_staff_earnings()` DB function resolves most-specific rule (service > staff > default); idempotent via ON CONFLICT DO NOTHING
+- `service_bundles` + `bundle_credits`: pre-paid session packs; `redeem_bundle_credit()` with `FOR UPDATE SKIP LOCKED` prevents double-spend; pg_cron daily expiry
+- WhatsApp Business API (Meta Cloud API v19.0): booking confirmation template (`booking_confirmed`, 6 params), appointment reminder (`appointment_reminder`, 3 params), OTP (`otp_code`); webhook handler for delivery receipts + inbound CANCEL replies
+- `walkin_queue` for POS transactions (waiting/in_service/completed/left/cancelled); `branch_kpis` matview includes `walkins_30d`
+- `update_staff_rating()` trigger: updates both `staff.rating` and `provider_profiles.avg_rating` on new review
+- 7 pg_cron jobs; 14 env vars; ₦ pricing with 3 MRR milestones
+
+---
+
+### [`wedplan-nigeria.md`](./wedplan-nigeria.md)
+
+**Markets**: Nigeria (NGN) · **Payments**: Paystack · **Auth**: Phone OTP (Termii) · **Comms**: WhatsApp Business API + Termii SMS · **Vertical**: Wedding Vendor Marketplace
+
+What's inside:
+- Two-sided marketplace: couples create a wedding event and book multiple vendor categories (photographer, caterer, DJ, florist, venue, videographer, makeup_artist, decorator)
+- `events` table as the anchor: `event_date date`, `guest_count`, `budget_kobo`; all bookings reference `event_id`
+- Mandatory 50% deposit enforced via `deposit_policy = {"deposit_percentage": 50}` on all `businesses`; `deposit_amount_kobo` computed in `book-slot` Edge Function from policy
+- `bookings` EXCLUDE USING gist on `(staff_id, branch_id, tstzrange(starts_at, ends_at, '[)'))` — prevents any vendor from being double-booked on the same date
+- `quotes` table with `inclusions jsonb`, `timeline jsonb`, `valid_until timestamptz`; pg_cron expires stale quotes every hour
+- `provider_profiles` with `search_vector tsvector GENERATED ALWAYS AS`, `location geography(POINT,4326)`, `service_cities text[]`; `portfolio_photos` with `sync_portfolio_count()` trigger
+- `update_vendor_rating()` trigger syncs both `staff.rating` and `provider_profiles.avg_rating` + `review_count` on new review
+- 6 pg_cron jobs: hold expiry, KPI refresh, balance reminder 7d, balance reminder 3d, event-day check-in prompt, post-event review prompt
+- WhatsApp booking confirmations + balance reminders; Termii SMS fallback
+- ₦ pricing reference for 7 vendor categories (starter/mid/premium); 3-milestone MRR projection
+
+---
+
 ## How to Read These Files
 
 Each section is self-contained — you can jump directly to what you need:

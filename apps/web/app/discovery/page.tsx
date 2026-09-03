@@ -3,98 +3,102 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-type Artisan = {
+type Provider = {
   id: string;
   business_name: string;
-  headline?: string;
-  category?: string;
-  city?: string;
-  reason?: string;
-  stats?: { avg_rating?: number; total_reviews?: number; completed_jobs?: number };
-  badges?: string[];
+  category: string;
+  city: string;
+  avg_rating: number;
+  total_reviews: number;
+  completed_jobs: number;
+  is_verified: boolean;
 };
 
-async function loadSection(path: string, token: string | null) {
-  const res = await fetch(path, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
-  const data = await res.json();
-  return data.artisans ?? [];
-}
-
-function ArtisanCard({ artisan, label }: { artisan: Artisan; label: string }) {
-  async function track(event_type: 'view' | 'click') {
-    const token = window.localStorage.getItem('kajola_access_token');
-    if (!token) return;
-    await fetch('/api/activity', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ artisan_id: artisan.id, event_type })
-    }).catch(() => {});
-  }
-
-  useEffect(() => {
-    track('view');
-  }, [artisan.id]);
-
+function ProviderCard({ p }: { p: Provider }) {
   return (
     <Link
-      href={`/discovery/${artisan.id}`}
-      onClick={() => track('click')}
-      style={{ padding: 16, borderRadius: 8, background: '#F8FAFC', border: '1px solid #E5E7EB', textDecoration: 'none', color: '#111827' }}
+      href={`/discovery/${p.id}`}
+      style={{
+        display: 'block', padding: 20, borderRadius: 12,
+        background: '#F8FAFC', border: '1px solid #E5E7EB',
+        textDecoration: 'none', color: '#111827',
+      }}
     >
-      <p style={{ margin: 0, color: '#6B7280', fontSize: 13 }}>{artisan.reason ?? label}</p>
-      <h3 style={{ margin: '8px 0 0' }}>{artisan.business_name}</h3>
-      <p style={{ margin: '6px 0 0', color: '#6B7280' }}>{artisan.headline || artisan.category}</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h3 style={{ margin: 0 }}>{p.business_name}</h3>
+          <p style={{ margin: '4px 0 0', color: '#6B7280', fontSize: 14 }}>{p.category} · {p.city}</p>
+        </div>
+        {p.is_verified && (
+          <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 999, background: '#dcfce7', color: '#166534', fontWeight: 600 }}>
+            Verified
+          </span>
+        )}
+      </div>
       <p style={{ margin: '10px 0 0', color: '#374151' }}>
-        ⭐ {Number(artisan.stats?.avg_rating ?? 0).toFixed(1)} ({artisan.stats?.total_reviews ?? 0}) · {artisan.stats?.completed_jobs ?? 0} jobs
+        ⭐ {p.avg_rating.toFixed(1)} ({p.total_reviews} reviews) · {p.completed_jobs} jobs
       </p>
-      {artisan.badges?.length ? <p style={{ margin: '8px 0 0', fontWeight: 700, color: '#166534' }}>{artisan.badges.join(' · ')}</p> : null}
     </Link>
   );
 }
 
-function Section({ title, label, artisans }: { title: string; label: string; artisans: Artisan[] }) {
-  return (
-    <section style={{ marginTop: 28 }}>
-      <h2>{title}</h2>
-      <div style={{ display: 'grid', gap: 14, marginTop: 12 }}>
-        {artisans.length === 0 ? <p>No artisans available yet.</p> : artisans.map((artisan) => <ArtisanCard key={`${title}-${artisan.id}`} artisan={artisan} label={label} />)}
-      </div>
-    </section>
-  );
-}
-
 export default function DiscoveryPage() {
-  const [recommended, setRecommended] = useState<Artisan[]>([]);
-  const [topRated, setTopRated] = useState<Artisan[]>([]);
-  const [popular, setPopular] = useState<Artisan[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [city, setCity]           = useState('');
+  const [category, setCategory]   = useState('');
 
-  useEffect(() => {
-    async function load() {
-      const token = window.localStorage.getItem('kajola_access_token');
-      const [recommendedData, topRatedData, popularData] = await Promise.all([
-        loadSection('/api/discovery/recommended', token),
-        loadSection('/api/artisans?limit=6', null),
-        loadSection('/api/discovery/popular', null)
-      ]);
-      setRecommended(recommendedData);
-      setTopRated(topRatedData);
-      setPopular(popularData);
-      setLoading(false);
-    }
-    load();
-  }, []);
+  async function load() {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (city)     params.set('city', city);
+    if (category) params.set('category', category);
+    const res  = await fetch(`/api/artisans?${params}`);
+    const data = await res.json();
+    setProviders(data.artisans ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, [city, category]);
 
   return (
     <main style={{ padding: 32, fontFamily: 'system-ui, sans-serif', maxWidth: 960, margin: '0 auto' }}>
-      <h1>Discover Artisans</h1>
-      <p style={{ marginTop: 12, color: '#4B5563' }}>Personalized picks ranked by trust, availability, behavior, and booking momentum.</p>
-      {loading ? <p>Loading recommendations...</p> : (
-        <>
-          <Section title="Recommended for You" label="Because of your recent activity" artisans={recommended} />
-          <Section title="Top Rated Near You" label="Highly rated near you" artisans={topRated} />
-          <Section title="Popular Right Now" label="Popular right now" artisans={popular} />
-        </>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1 style={{ margin: 0 }}>Discover Providers</h1>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <a href="/dashboard" style={{ color: '#2563eb' }}>My bookings</a>
+          <a href="/logout"    style={{ color: '#ef4444' }}>Log out</a>
+        </div>
+      </div>
+      <p style={{ marginTop: 8, color: '#6B7280' }}>Beauty, barbershop, and nail services in Lagos</p>
+
+      <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+        <select value={city} onChange={(e) => setCity(e.target.value)}
+          style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14 }}>
+          <option value="">All areas</option>
+          <option value="lekki">Lekki</option>
+          <option value="victoria-island">Victoria Island</option>
+          <option value="surulere">Surulere</option>
+          <option value="ikeja">Ikeja</option>
+          <option value="yaba">Yaba</option>
+        </select>
+        <select value={category} onChange={(e) => setCategory(e.target.value)}
+          style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14 }}>
+          <option value="">All categories</option>
+          <option value="Beauty">Beauty</option>
+          <option value="Barbershop">Barbershop</option>
+          <option value="Nails">Nails</option>
+        </select>
+      </div>
+
+      {loading ? (
+        <p style={{ marginTop: 24, color: '#6B7280' }}>Loading providers…</p>
+      ) : providers.length === 0 ? (
+        <p style={{ marginTop: 24 }}>No providers found. Try a different area or category.</p>
+      ) : (
+        <div style={{ display: 'grid', gap: 14, marginTop: 20 }}>
+          {providers.map((p) => <ProviderCard key={p.id} p={p} />)}
+        </div>
       )}
     </main>
   );

@@ -3,79 +3,83 @@
 import { useEffect, useState } from 'react';
 
 type Booking = {
-  id: string;
-  status: string;
-  created_at: string;
-  service: { name: string; price_cents: number; currency: string } | null;
-  artisan: { business_name: string } | null;
-  payments: Array<{ status: string; amount_cents: number }>;
+  id: string; status: string; starts_at: string;
+  service_name?: string; provider_name?: string;
+  total_amount_kobo: number; deposit_amount_kobo: number;
+};
+
+const STATUS_COLOR: Record<string, string> = {
+  held: '#fef3c7', awaiting_payment: '#fef3c7', confirmed: '#dcfce7',
+  checked_in: '#dbeafe', in_progress: '#dbeafe', completed: '#f0fdf4',
+  cancelled: '#f3f4f6', no_show: '#fef2f2', disputed: '#fef2f2',
 };
 
 export default function DashboardPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState('');
+  const [loading,  setLoading]  = useState(true);
+  const [message,  setMessage]  = useState('');
 
   useEffect(() => {
-    async function load() {
-      const token = typeof window !== 'undefined' ? window.localStorage.getItem('kajola_access_token') : null;
-      if (!token) {
-        setMessage('Sign in to view your bookings.');
+    fetch('/api/bookings')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error === 'Unauthorized') setMessage('Sign in to view your bookings.');
+        else setBookings(d.bookings ?? []);
         setLoading(false);
-        return;
-      }
-
-      try {
-        const res = await fetch('/api/bookings', {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setMessage(data.error ?? 'Unable to load bookings');
-        } else {
-          setBookings(data.bookings ?? []);
-        }
-      } catch (err) {
-        setMessage(err instanceof Error ? err.message : 'Network error');
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    load();
+      })
+      .catch(() => { setMessage('Network error.'); setLoading(false); });
   }, []);
 
   return (
     <main style={{ padding: 32, fontFamily: 'system-ui, sans-serif', maxWidth: 860, margin: '0 auto' }}>
-      <h1>My Bookings</h1>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-          <h1 style={{ margin: 0 }}>My Bookings</h1>
-          <a href="/dashboard/payments" style={{ color: '#2563eb' }}>Payment history</a>
+        <h1 style={{ margin: 0 }}>My Bookings</h1>
+        <div style={{ display: 'flex', gap: 16 }}>
+          <a href="/discovery" style={{ color: '#2563eb' }}>Book a service</a>
+          <a href="/logout"    style={{ color: '#ef4444' }}>Log out</a>
         </div>
-        <a href="/logout" style={{ color: '#ef4444' }}>Log out</a>
       </div>
-      {loading ? (
-        <p>Loading…</p>
-      ) : message ? (
-        <p style={{ color: '#b91c1c' }}>{message}</p>
-      ) : bookings.length === 0 ? (
-        <p>No bookings found.</p>
-      ) : (
-        <div style={{ display: 'grid', gap: 20, marginTop: 24 }}>
-          {bookings.map((booking) => (
-            <div key={booking.id} style={{ padding: 20, borderRadius: 18, background: '#f8fafc', border: '1px solid #e5e7eb' }}>
-              <h2 style={{ margin: 0 }}>{booking.service?.name ?? 'Service'}</h2>
-              <p style={{ margin: '8px 0' }}>{booking.artisan?.business_name ?? 'Artisan'}</p>
-              <p style={{ margin: '8px 0' }}>Status: {booking.status}</p>
-              <p style={{ margin: '8px 0' }}>Amount: NGN {(booking.service?.price_cents ?? 0) / 100}</p>
-              <p style={{ margin: '8px 0', color: '#6b7280' }}>{new Date(booking.created_at).toLocaleString()}</p>
-              <a href={`/dashboard/bookings/${booking.id}`} style={{ color: '#2563eb' }}>View details</a>
-            </div>
-          ))}
+
+      {message && (
+        <div style={{ padding: 16, background: '#fef2f2', borderRadius: 8, color: '#b91c1c', marginBottom: 16 }}>
+          {message} <a href="/auth/login?redirect=/dashboard" style={{ color: '#2563eb', marginLeft: 8 }}>Sign in</a>
         </div>
       )}
+
+      {loading ? <p style={{ color: '#6B7280' }}>Loading…</p> :
+        bookings.length === 0 && !message ? (
+          <div style={{ textAlign: 'center', marginTop: 48, color: '#6B7280' }}>
+            <p style={{ fontSize: 18 }}>No bookings yet.</p>
+            <a href="/discovery" style={{ color: '#D9922A', fontWeight: 600 }}>Find a provider →</a>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 14 }}>
+            {bookings.map((b) => (
+              <a
+                key={b.id}
+                href={`/dashboard/bookings/${b.id}`}
+                data-testid={`booking-${b.id}`}
+                style={{
+                  display: 'block', padding: 20, borderRadius: 12,
+                  background: STATUS_COLOR[b.status] ?? '#f8fafc',
+                  border: '1px solid #E5E7EB', textDecoration: 'none', color: '#111827',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <h3 style={{ margin: 0 }}>{b.service_name ?? 'Service'}</h3>
+                  <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{b.status.replace('_', ' ')}</span>
+                </div>
+                <p style={{ margin: '6px 0 0', color: '#6B7280', fontSize: 14 }}>
+                  {b.provider_name} · {new Date(b.starts_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}
+                </p>
+                <p style={{ margin: '4px 0 0', fontSize: 14 }}>
+                  Total ₦{(b.total_amount_kobo / 100).toLocaleString()} · Deposit ₦{(b.deposit_amount_kobo / 100).toLocaleString()}
+                </p>
+              </a>
+            ))}
+          </div>
+        )
+      }
     </main>
   );
 }

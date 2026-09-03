@@ -8,17 +8,14 @@ export default function HomePage() {
         Welcome to Kajola. This scaffold includes auth pages, bookings routing, and Supabase function forwarding.
       </p>
       <div style={{ display: 'flex', gap: 16, marginTop: 32, flexWrap: 'wrap' }}>
+        <Link href="/generate" style={{ padding: '14px 20px', background: '#C8911A', color: '#0D1321', borderRadius: 10, textDecoration: 'none', fontWeight: 700 }}>
+          ⚡ Generate Architecture
+        </Link>
         <Link href="/dashboard" style={{ padding: '14px 20px', background: '#2563eb', color: '#FFFFFF', borderRadius: 10, textDecoration: 'none', fontWeight: 700 }}>
           Open dashboard
         </Link>
-        <Link href="/logout" style={{ padding: '14px 20px', background: '#ef4444', color: '#FFFFFF', borderRadius: 10, textDecoration: 'none', fontWeight: 700 }}>
-          Log out
-        </Link>
-        <Link href="/auth/login" style={{ padding: '14px 20px', background: '#D9922A', color: '#0B0705', borderRadius: 10, textDecoration: 'none', fontWeight: 700 }}>
+        <Link href="/auth/login" style={{ padding: '14px 20px', background: '#111827', color: '#FFFFFF', borderRadius: 10, textDecoration: 'none', fontWeight: 700 }}>
           Login
-        </Link>
-        <Link href="/auth/signup" style={{ padding: '14px 20px', background: '#111827', color: '#FFFFFF', borderRadius: 10, textDecoration: 'none', fontWeight: 700 }}>
-          Sign up
         </Link>
       </div>
     </main>

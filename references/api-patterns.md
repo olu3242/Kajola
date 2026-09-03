@@ -348,7 +348,7 @@ async function transitionBookingState(
   if (toStatus === "checked_in")  patch.checked_in_at = new Date().toISOString();
   if (toStatus === "in_progress") patch.started_at    = new Date().toISOString();
   if (toStatus === "completed")   patch.completed_at  = new Date().toISOString();
-  if (toStatus === "cancelled")   { patch.cancelled_at = new Date().toISOString(); patch.cancel_reason = meta.reason ?? ""; }
+  if (toStatus === "cancelled")   { patch.cancelled_at = new Date().toISOString(); patch.cancellation_reason = meta.reason ?? ""; }
   if (toStatus === "confirmed")   patch.held_until    = null;  // clear hold timer
 
   // 3. Apply
@@ -361,9 +361,9 @@ async function transitionBookingState(
 
   // 4. Enqueue automation event (fire-and-forget via automation_jobs)
   await supabase.from("automation_jobs").insert({
-    event_type:      `booking.${toStatus}`,
+    job_type:        `booking.${toStatus}`,
     payload:         { booking_id: bookingId, from_status: from, actor_id: meta.userId },
-    idempotency_key: `booking-${bookingId}-${toStatus}-${Date.now()}`,
+    idempotency_key: `booking-${bookingId}-${toStatus}`,
   });
 
   return { ok: true };
@@ -429,10 +429,10 @@ async function initiateDeposit(req: Request): Promise<Response> {
 
   const idempotencyKey = `booking-${booking_id}-deposit`;
 
-  // Upsert momo_transactions — idempotent: if already initiated, return existing reference
-  const { data: existing } = await supabase.from("momo_transactions").select("provider_reference").eq("idempotency_key", idempotencyKey).maybeSingle();
-  if (existing?.provider_reference) {
-    return ok({ checkout_request_id: existing.provider_reference, message: "STK Push already sent — check your phone" });
+  // Upsert mobile_money_transactions — idempotent: if already initiated, return existing reference
+  const { data: existing } = await supabase.from("mobile_money_transactions").select("provider_ref").eq("idempotency_key", idempotencyKey).maybeSingle();
+  if (existing?.provider_ref) {
+    return ok({ checkout_request_id: existing.provider_ref, message: "STK Push already sent — check your phone" });
   }
 
   // Initiate STK Push
@@ -443,15 +443,15 @@ async function initiateDeposit(req: Request): Promise<Response> {
     description: `Deposit`,
   });
 
-  await supabase.from("momo_transactions").insert({
-    tenant_id:       booking.tenant_id,
-    booking_id:      booking_id,
-    customer_id:     user.id,
-    provider:        "mpesa_ke",
-    momo_direction:  "c2b",
-    amount_kes:      booking.deposit_kes,
+  await supabase.from("mobile_money_transactions").insert({
+    tenant_id:    booking.tenant_id,
+    booking_id:   booking_id,
+    customer_id:  user.id,
+    provider:     "mpesa_ke",
+    direction:    "c2b",
+    amount:       booking.deposit_kes,
     phone,
-    provider_reference: CheckoutRequestID,
+    provider_ref: CheckoutRequestID,
     idempotency_key: idempotencyKey,
   });
 
@@ -469,19 +469,19 @@ async function creditLoyaltyPoints(bookingId: string): Promise<void> {
   if (!booking) return;
 
   const idempotencyKey = `loyalty-${bookingId}-earn`;
-  const { data: existing } = await supabase.from("loyalty_transactions").select("id").eq("booking_id", bookingId).eq("tx_type", "earn").maybeSingle();
+  const { data: existing } = await supabase.from("loyalty_transactions").select("id").eq("idempotency_key", idempotencyKey).maybeSingle();
   if (existing) return;  // already credited — idempotent
 
-  // 1 point per KES spent (integer, no sub-point)
-  const points = booking.price_kes;
+  // 1 point per currency unit spent (integer, no sub-point)
+  const pointsDelta = booking.total_amount ?? booking.price_kes ?? 0;
 
   // Upsert loyalty account (create if first booking)
   const { data: account } = await supabase.from("loyalty_accounts")
     .upsert({ tenant_id: booking.tenant_id, customer_id: booking.customer_id }, { onConflict: "customer_id" })
     .select("id, points_balance, lifetime_points").single();
 
-  const newBalance       = account.points_balance  + points;
-  const newLifetime      = account.lifetime_points + points;
+  const newBalance  = account.points_balance  + pointsDelta;
+  const newLifetime = account.lifetime_points + pointsDelta;
 
   // Determine tier upgrade
   const newTier = newLifetime >= 50000 ? "platinum" : newLifetime >= 20000 ? "gold" : newLifetime >= 5000 ? "silver" : "bronze";
@@ -489,12 +489,14 @@ async function creditLoyaltyPoints(bookingId: string): Promise<void> {
   await Promise.all([
     supabase.from("loyalty_accounts").update({ points_balance: newBalance, lifetime_points: newLifetime, tier: newTier }).eq("id", account.id),
     supabase.from("loyalty_transactions").insert({
-      tenant_id:    booking.tenant_id,
-      account_id:   account.id,
-      booking_id:   bookingId,
-      tx_type:      "earn",
-      points:       points,
-      balance_after: newBalance,
+      tenant_id:      booking.tenant_id,
+      account_id:     account.id,
+      booking_id:     bookingId,
+      event_type:     "points_earned",
+      points_delta:   pointsDelta,
+      balance_after:  newBalance,
+      description:    `Earned ${pointsDelta} points for booking ${bookingId}`,
+      idempotency_key: idempotencyKey,
     }),
   ]);
 }
@@ -853,6 +855,8 @@ interface FlutterwaveChargeParams {
   customerPhone: string;
   customerName: string;
   redirectUrl: string;     // where to send customer after payment
+  platformName?: string;   // displayed on the Flutterwave payment page
+  logoUrl?: string;        // platform logo URL for the payment page
   meta?: Record<string, unknown>;
 }
 
@@ -877,8 +881,8 @@ async function initiateFlutterwavePayment(
       },
       meta: params.meta ?? {},
       customizations: {
-        title: "CleanRun Payment",
-        logo: "https://cleanrun.app/logo.png",
+        title: params.platformName ?? "Payment",
+        ...(params.logoUrl ? { logo: params.logoUrl } : {}),
       },
     }),
   });
@@ -1354,3 +1358,810 @@ const path = await uploadPrivateFile(
 - Prefer short expiry (300s) for sensitive documents; use 3600s for app-session contexts only
 
 Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+---
+
+## WhatsApp Business API (Meta Cloud API)
+
+Send booking confirmations, reminders, and OTP messages via WhatsApp. Use WhatsApp as the primary notification channel for customers who opt in (`profiles.whatsapp_opted_in = true`); fall back to SMS (Termii/Africa's Talking) for all others.
+
+### Send WhatsApp Template Message
+
+```typescript
+// supabase/functions/_shared/whatsapp.ts
+
+interface WhatsAppTemplateMessage {
+  to: string;                          // E.164 phone number, e.g. "+2348012345678"
+  templateName: string;                // Approved template name on Meta dashboard
+  languageCode?: string;               // Default: "en"
+  components?: WhatsAppTemplateComponent[];
+}
+
+interface WhatsAppTemplateComponent {
+  type: "header" | "body" | "button";
+  parameters: Array<
+    | { type: "text"; text: string }
+    | { type: "date_time"; date_time: { fallback_value: string } }
+    | { type: "currency"; currency: { fallback_value: string; code: string; amount_1000: number } }
+    | { type: "payload"; payload: string }
+  >;
+}
+
+interface WhatsAppMessageResponse {
+  messages: Array<{ id: string }>;
+}
+
+export async function sendWhatsAppTemplate(
+  msg: WhatsAppTemplateMessage
+): Promise<WhatsAppMessageResponse> {
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID")!;
+  const accessToken   = Deno.env.get("WHATSAPP_ACCESS_TOKEN")!;
+
+  const res = await fetch(
+    `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: msg.to.replace("+", ""),
+        type: "template",
+        template: {
+          name: msg.templateName,
+          language: { code: msg.languageCode ?? "en" },
+          components: msg.components ?? [],
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(`WhatsApp API error: ${err.error?.message ?? res.statusText}`);
+  }
+  return res.json();
+}
+```
+
+### Booking Confirmation Message
+
+```typescript
+// Template name: "booking_confirmed" (pre-approved on Meta Business Manager)
+// Template body: "Hi {{1}}, your appointment at {{2}} is confirmed for {{3}} at {{4}}. 📍 {{5}}. Ref: {{6}}"
+
+export async function sendBookingConfirmationWhatsApp(params: {
+  phone: string;
+  customerName: string;
+  businessName: string;
+  appointmentDate: string;   // e.g. "Monday, 28 July 2026"
+  appointmentTime: string;   // e.g. "10:00 AM"
+  branchAddress: string;
+  bookingRef: string;
+}): Promise<void> {
+  await sendWhatsAppTemplate({
+    to: params.phone,
+    templateName: "booking_confirmed",
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: params.customerName },
+          { type: "text", text: params.businessName },
+          { type: "text", text: params.appointmentDate },
+          { type: "text", text: params.appointmentTime },
+          { type: "text", text: params.branchAddress },
+          { type: "text", text: params.bookingRef },
+        ],
+      },
+    ],
+  });
+}
+```
+
+### Appointment Reminder Message
+
+```typescript
+// Template name: "appointment_reminder"
+// Template body: "Reminder: {{1}}, you have an appointment at {{2}} tomorrow at {{3}}. Reply CANCEL to cancel."
+
+export async function sendAppointmentReminderWhatsApp(params: {
+  phone: string;
+  customerName: string;
+  businessName: string;
+  appointmentTime: string;
+}): Promise<void> {
+  await sendWhatsAppTemplate({
+    to: params.phone,
+    templateName: "appointment_reminder",
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: params.customerName },
+          { type: "text", text: params.businessName },
+          { type: "text", text: params.appointmentTime },
+        ],
+      },
+    ],
+  });
+}
+```
+
+### WhatsApp OTP Message
+
+```typescript
+// Template name: "otp_code" (must use Meta's OTP template category)
+// Template body: "{{1}} is your {{2}} verification code. Valid for {{3}} minutes."
+
+export async function sendWhatsAppOtp(params: {
+  phone: string;
+  otpCode: string;
+  platformName: string;
+  expiryMinutes?: number;
+}): Promise<void> {
+  await sendWhatsAppTemplate({
+    to: params.phone,
+    templateName: "otp_code",
+    components: [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: params.otpCode },
+          { type: "text", text: params.platformName },
+          { type: "text", text: String(params.expiryMinutes ?? 5) },
+        ],
+      },
+    ],
+  });
+}
+```
+
+### WhatsApp Webhook Handler (Delivery Status)
+
+```typescript
+// POST /functions/v1/whatsapp-webhook
+// Handles delivery receipts and inbound "CANCEL" replies from customers
+
+const VERIFY_TOKEN = Deno.env.get("WHATSAPP_WEBHOOK_VERIFY_TOKEN")!;
+
+serve(async (req) => {
+  // GET: Meta webhook verification handshake
+  if (req.method === "GET") {
+    const url    = new URL(req.url);
+    const mode   = url.searchParams.get("hub.mode");
+    const token  = url.searchParams.get("hub.verify_token");
+    const challenge = url.searchParams.get("hub.challenge");
+    if (mode === "subscribe" && token === VERIFY_TOKEN) {
+      return new Response(challenge, { status: 200 });
+    }
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  // POST: incoming event
+  const body = await req.json();
+  const entry = body.entry?.[0];
+  const change = entry?.changes?.[0];
+  const value  = change?.value;
+
+  // Delivery/read status update
+  if (value?.statuses?.length) {
+    for (const status of value.statuses) {
+      // status.id = WhatsApp message ID, status.status = 'sent'|'delivered'|'read'|'failed'
+      await supabase.from("notification_logs").update({
+        delivery_status: status.status,
+        delivered_at: status.status === "delivered" ? new Date().toISOString() : undefined,
+        read_at:      status.status === "read"      ? new Date().toISOString() : undefined,
+      }).eq("provider_message_id", status.id);
+    }
+  }
+
+  // Inbound text message (e.g. customer replies "CANCEL")
+  if (value?.messages?.length) {
+    for (const message of value.messages) {
+      if (message.type === "text") {
+        const text = message.text.body.trim().toUpperCase();
+        const phone = `+${message.from}`;
+        if (text === "CANCEL") {
+          // Find the customer's next upcoming booking and cancel it
+          const { data: customer } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("phone", phone)
+            .maybeSingle();
+          if (customer) {
+            await supabase
+              .from("bookings")
+              .update({ status: "cancelled", cancellation_reason: "customer_whatsapp_cancel" })
+              .eq("customer_id", customer.id)
+              .eq("status", "confirmed")
+              .gte("starts_at", new Date().toISOString())
+              .order("starts_at", { ascending: true })
+              .limit(1);
+          }
+        }
+      }
+    }
+  }
+
+  return new Response("OK", { status: 200 });
+});
+```
+
+Required env vars: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_BUSINESS_ACCOUNT_ID`
+
+**Setup notes**:
+- Register on Meta for Developers → create a WhatsApp Business app → get a test phone number
+- All template messages must be pre-approved by Meta before sending (allow 48–72h for approval)
+- Add `whatsapp_opted_in boolean NOT NULL DEFAULT false` to `profiles` table
+- Send WhatsApp only when `whatsapp_opted_in = true`; fall back to SMS otherwise
+- Nigeria numbers: prefix `234`, Ghana: `233`, Kenya: `254`, Côte d'Ivoire: `225`
+
+---
+
+## Paystack Transfer (Vendor Payout)
+
+Use this pattern to disburse earnings to vendors after a booking completes. Paystack Transfer API sends NGN to a registered bank account. All transfers are idempotent via a stable `reference` derived from the `payouts.id`.
+
+```typescript
+interface InitiatePayoutParams {
+  payoutId:            string;   // payouts.id — used as idempotency reference
+  recipientCode:       string;   // vendor_bank_accounts.paystack_recipient_code
+  amountKobo:          number;
+  reason?:             string;
+}
+
+interface CreateRecipientParams {
+  accountNumber: string;
+  bankCode:      string;
+  accountName:   string;
+  businessId:    string;         // stored in metadata for webhook reconciliation
+}
+
+// Step 1: Register vendor's bank account as a Paystack Transfer Recipient
+export async function createPaystackRecipient(
+  params: CreateRecipientParams
+): Promise<{ recipientCode: string }> {
+  const res = await fetch("https://api.paystack.co/transferrecipient", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${Deno.env.get("PAYSTACK_SECRET_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      type:           "nuban",
+      name:           params.accountName,
+      account_number: params.accountNumber,
+      bank_code:      params.bankCode,
+      currency:       "NGN",
+      metadata:       { business_id: params.businessId },
+    }),
+  });
+  const json = await res.json();
+  if (!json.status) throw new Error(json.message);
+  return { recipientCode: json.data.recipient_code };
+}
+
+// Step 2: Initiate transfer to vendor
+export async function initiateVendorPayout(
+  params: InitiatePayoutParams
+): Promise<{ transferCode: string; transferRef: string }> {
+  const reference = `payout-${params.payoutId}`;  // stable, not Date.now()
+
+  const res = await fetch("https://api.paystack.co/transfer", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${Deno.env.get("PAYSTACK_SECRET_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      source:    "balance",
+      amount:    params.amountKobo,
+      recipient: params.recipientCode,
+      reason:    params.reason ?? "Booking payout",
+      currency:  "NGN",
+      reference,
+    }),
+  });
+  const json = await res.json();
+  if (!json.status) throw new Error(json.message);
+  return {
+    transferCode: json.data.transfer_code,
+    transferRef:  json.data.reference,
+  };
+}
+
+// Step 3: Webhook handler for transfer events (Edge Function: confirm-transfer)
+// Paystack sends transfer.success / transfer.failed / transfer.reversed
+// Verify HMAC-SHA-512 on x-paystack-signature before processing
+export async function handleTransferWebhook(
+  rawBody: string,
+  sig: string,
+  supabase: SupabaseClient
+): Promise<void> {
+  const expected = createHmac("sha512", Deno.env.get("PAYSTACK_SECRET_KEY")!)
+    .update(rawBody).digest("hex");
+  if (sig !== expected) throw new Error("Invalid signature");
+
+  const event = JSON.parse(rawBody);
+  const { reference, transfer_code } = event.data;
+  const payoutId = reference.replace("payout-", "");
+
+  if (event.event === "transfer.success") {
+    await supabase.from("payouts").update({
+      status:       "success",
+      completed_at: new Date().toISOString(),
+    }).eq("id", payoutId);
+
+    await supabase.from("payout_ledger").update({ status: "paid" })
+      .eq("payout_id", payoutId);
+  }
+
+  if (event.event === "transfer.failed") {
+    await supabase.from("payouts").update({
+      status:         "failed",
+      failure_reason: event.data.reason ?? "unknown",
+    }).eq("id", payoutId);
+
+    await supabase.from("payout_ledger").update({ status: "failed" })
+      .eq("payout_id", payoutId);
+  }
+
+  if (event.event === "transfer.reversed") {
+    await supabase.from("payouts").update({ status: "reversed" })
+      .eq("id", payoutId);
+    // Move ledger rows back to 'pending' for retry
+    await supabase.from("payout_ledger").update({ status: "pending", payout_id: null })
+      .eq("payout_id", payoutId);
+  }
+}
+```
+
+Required env vars: `PAYSTACK_SECRET_KEY`
+
+**Setup notes**:
+- Enable Transfer on your Paystack dashboard (Transfers → Settings → Enable transfers)
+- Use `Paystack.verifyAccountNumber` before creating a recipient to validate account details
+- Nigeria: 9-digit NUBAN account numbers; bank codes from `GET https://api.paystack.co/bank`
+- Always use a stable `reference = payout-{uuid}` — never append timestamps
+- Paystack balance must be funded before transfer; monitor via `GET /balance`
+
+---
+
+## Validate & Apply Coupon Edge Function (SCOS Engine #33)
+
+```typescript
+// supabase/functions/validate-coupon/index.ts
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+interface CouponRequest {
+  coupon_code: string;
+  booking_id:  string;
+  service_id:  string;
+  order_value_kobo: number;
+}
+
+serve(async (req) => {
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return new Response("Unauthorized", { status: 401 });
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(
+    authHeader.replace("Bearer ", ""),
+  );
+  if (authErr || !user) return new Response("Unauthorized", { status: 401 });
+
+  const body: CouponRequest = await req.json();
+  const { coupon_code, booking_id, service_id, order_value_kobo } = body;
+
+  // 1. Fetch coupon (status=active, not expired)
+  const { data: coupon, error: couponErr } = await supabase
+    .from("coupons")
+    .select("*")
+    .eq("code", coupon_code.trim().toUpperCase())
+    .eq("status", "active")
+    .gt("expires_at", new Date().toISOString())   // NULL expires_at passes this filter too
+    .maybeSingle();
+
+  // Rewrite: expires_at IS NULL OR expires_at > now() — use RPC instead for OR
+  if (couponErr || !coupon) {
+    return Response.json({ valid: false, reason: "coupon_not_found" }, { status: 422 });
+  }
+
+  // 2. Check global usage cap
+  if (coupon.max_uses !== null && coupon.used_count >= coupon.max_uses) {
+    return Response.json({ valid: false, reason: "coupon_exhausted" }, { status: 422 });
+  }
+
+  // 3. Check per-customer usage
+  const { count: customerUses } = await supabase
+    .from("coupon_uses")
+    .select("id", { count: "exact", head: true })
+    .eq("coupon_id", coupon.id)
+    .eq("customer_id", user.id);
+  if ((customerUses ?? 0) >= coupon.max_uses_per_customer) {
+    return Response.json({ valid: false, reason: "already_used" }, { status: 422 });
+  }
+
+  // 4. Check minimum order value
+  if (order_value_kobo < coupon.min_order_value_kobo) {
+    return Response.json({
+      valid: false,
+      reason: "below_minimum",
+      min_order_kobo: coupon.min_order_value_kobo,
+    }, { status: 422 });
+  }
+
+  // 5. Check service restriction
+  const conditions = coupon.conditions ?? {};
+  if (conditions.service_ids?.length && !conditions.service_ids.includes(service_id)) {
+    return Response.json({ valid: false, reason: "service_not_eligible" }, { status: 422 });
+  }
+
+  // 6. Check customer segment restriction
+  if (conditions.first_booking_only) {
+    const { count: prevBookings } = await supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("customer_id", user.id)
+      .eq("status", "completed");
+    if ((prevBookings ?? 0) > 0) {
+      return Response.json({ valid: false, reason: "new_customers_only" }, { status: 422 });
+    }
+  }
+
+  // 7. Compute discount
+  let discount_kobo = 0;
+  if (coupon.discount_type === "percentage") {
+    discount_kobo = Math.round(order_value_kobo * (coupon.discount_value / 100));
+    if (coupon.max_discount_kobo) {
+      discount_kobo = Math.min(discount_kobo, coupon.max_discount_kobo);
+    }
+  } else if (coupon.discount_type === "fixed_amount") {
+    discount_kobo = Math.min(
+      Math.round(coupon.discount_value * 100), // kobo conversion
+      order_value_kobo,
+    );
+  } else if (coupon.discount_type === "free_service") {
+    discount_kobo = order_value_kobo;
+  }
+
+  // 8. Record use + increment counter atomically via RPC
+  const { error: useErr } = await supabase.rpc("apply_coupon", {
+    p_coupon_id:            coupon.id,
+    p_booking_id:           booking_id,
+    p_customer_id:          user.id,
+    p_discount_applied_kobo: discount_kobo,
+  });
+  // apply_coupon() is a Postgres function that INSERTs coupon_uses and
+  // does UPDATE coupons SET used_count = used_count + 1 — both in one transaction
+  if (useErr) {
+    return Response.json({ valid: false, reason: "apply_failed", detail: useErr.message },
+      { status: 409 });
+  }
+
+  return Response.json({
+    valid:          true,
+    discount_kobo,
+    final_amount_kobo: order_value_kobo - discount_kobo,
+    coupon_id:      coupon.id,
+    description:    coupon.description,
+  });
+});
+```
+
+Companion Postgres function for atomic coupon application:
+
+```sql
+CREATE OR REPLACE FUNCTION apply_coupon(
+  p_coupon_id             uuid,
+  p_booking_id            uuid,
+  p_customer_id           uuid,
+  p_discount_applied_kobo bigint
+) RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  INSERT INTO coupon_uses (coupon_id, booking_id, customer_id, discount_applied_kobo)
+  VALUES (p_coupon_id, p_booking_id, p_customer_id, p_discount_applied_kobo);
+
+  UPDATE coupons
+  SET used_count = used_count + 1,
+      status = CASE
+        WHEN max_uses IS NOT NULL AND used_count + 1 >= max_uses THEN 'exhausted'
+        ELSE status
+      END,
+      updated_at = now()
+  WHERE id = p_coupon_id;
+END;
+$$;
+```
+
+Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+**Notes**:
+- Coupon code lookup is case-insensitive — always normalise to `UPPER()` before insert
+- `apply_coupon()` runs as SECURITY DEFINER so it bypasses RLS; do all validation checks in the Edge Function before calling it
+- For `expires_at IS NULL OR expires_at > now()` — fetch without the `.gt()` filter and check in application code, or use a Postgres view that encodes the OR
+- Campaign stats (`bookings_generated`, `revenue_kobo`) are updated via a separate pg_cron job aggregating from `coupon_uses JOIN bookings`
+
+---
+
+## AI Concierge Edge Function (SCOS Engine #42)
+
+Streaming Claude-powered booking assistant — handles natural-language slot requests, recommends services, surfaces provider availability, and hands off a pre-filled booking payload.
+
+```typescript
+// supabase/functions/ai-concierge/index.ts
+import { serve }         from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient }  from "https://esm.sh/@supabase/supabase-js@2";
+import Anthropic         from "npm:@anthropic-ai/sdk";
+
+const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY")! });
+
+interface ConversationTurn {
+  role:    "user" | "assistant";
+  content: string;
+}
+
+serve(async (req) => {
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  const { tenant_id, branch_id, messages, locale = "en" }:
+    { tenant_id: string; branch_id?: string; messages: ConversationTurn[]; locale?: string }
+    = await req.json();
+
+  // Load tenant context: services, categories, open hours, active promotions
+  const [{ data: services }, { data: promotions }, { data: tenant }] = await Promise.all([
+    supabase.from("services")
+      .select("id, name, duration_minutes, price_kobo, description, category_id")
+      .eq("tenant_id", tenant_id).eq("is_active", true).limit(60),
+    supabase.from("promotions")
+      .select("name, description, discount_type, discount_value, applies_to")
+      .eq("tenant_id", tenant_id).eq("status", "active").limit(10),
+    supabase.from("tenants").select("name, config").eq("id", tenant_id).single(),
+  ]);
+
+  const currency = (tenant?.config as Record<string, unknown>)?.currency_code ?? "NGN";
+  const serviceList = (services ?? []).map(s =>
+    `• ${s.name} — ${s.duration_minutes} min — ${currency} ${(s.price_kobo / 100).toFixed(2)}`
+  ).join("\n");
+  const promoList = (promotions ?? []).map(p =>
+    `• ${p.name}: ${p.description}`
+  ).join("\n") || "None active";
+
+  const systemPrompt = `You are the AI booking concierge for ${tenant?.name ?? "this business"}.
+Your job is to help customers find the right service, pick an available time, and start their booking.
+
+Available services:
+${serviceList}
+
+Active promotions:
+${promoList}
+
+Instructions:
+- Respond in ${locale === "fr" ? "French" : "English"} unless the customer switches languages.
+- Always confirm the service name, duration, and price before suggesting slots.
+- When you have enough information (service + preferred date/time + staff preference if any),
+  output a JSON block at the END of your message in this exact format (no markdown fences):
+  BOOKING_PAYLOAD:{"service_id":"...","preferred_date":"YYYY-MM-DD","preferred_time":"HH:MM","notes":"..."}
+- Never invent slot availability — tell the customer you'll check and that the booking UI will show real slots.
+- Keep replies concise (under 120 words). Do not list all services unless asked.`;
+
+  const stream = anthropic.messages.stream({
+    model:      "claude-opus-5",
+    max_tokens: 512,
+    system:     systemPrompt,
+    messages:   messages.map(m => ({ role: m.role, content: m.content })),
+  });
+
+  const readable = new ReadableStream({
+    async start(controller) {
+      for await (const chunk of stream) {
+        if (
+          chunk.type === "content_block_delta" &&
+          chunk.delta.type === "text_delta"
+        ) {
+          controller.enqueue(new TextEncoder().encode(chunk.delta.text));
+        }
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type":     "text/plain; charset=utf-8",
+      "Transfer-Encoding": "chunked",
+      "X-Accel-Buffering": "no",
+    },
+  });
+});
+```
+
+Required env vars: `ANTHROPIC_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+**Integration notes**:
+- Parse `BOOKING_PAYLOAD:{...}` from the last assistant message in the frontend to pre-fill the booking sheet
+- Store conversation turns in `ai_concierge_sessions` (session_id, tenant_id, customer_id, messages jsonb, created_at)
+- Rate-limit per customer: max 20 turns / 10 min via a counter in Redis or Supabase key-value
+- Pass `locale` from the customer's browser `navigator.language` or profile preference
+
+---
+
+## AI Business Coach Edge Function (SCOS Engine #43)
+
+Streaming advisory assistant for business owners — analyses their booking data, surfaces revenue opportunities, flags churn risk, and recommends SORF-aware actions.
+
+```typescript
+// supabase/functions/ai-business-coach/index.ts
+import { serve }        from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import Anthropic        from "npm:@anthropic-ai/sdk";
+
+const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY")! });
+
+serve(async (req) => {
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  // Auth: must be owner or admin
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return new Response("Unauthorized", { status: 401 });
+  const { data: { user } } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
+  if (!user) return new Response("Unauthorized", { status: 401 });
+
+  const { tenant_id, question }: { tenant_id: string; question: string } = await req.json();
+
+  // Verify user is owner/admin of this tenant
+  const { data: membership } = await supabase
+    .from("staff_members")
+    .select("role")
+    .eq("tenant_id", tenant_id)
+    .eq("profile_id", user.id)
+    .in("role", ["owner", "admin"])
+    .maybeSingle();
+  if (!membership) return new Response("Forbidden", { status: 403 });
+
+  // Pull live business snapshot (last 30 days)
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const [{ data: summary }, { data: topServices }, { data: churnRisk }] = await Promise.all([
+    supabase.rpc("business_snapshot_30d", { p_tenant_id: tenant_id }),
+    supabase.from("bookings")
+      .select("service_id, services(name), count:id.count(), revenue:total_amount_kobo.sum()")
+      .eq("tenant_id", tenant_id).gte("created_at", since)
+      .eq("status", "completed").limit(5),
+    // Customers with ≥2 completed bookings historically but none in last 60 days
+    supabase.rpc("churn_risk_customers", { p_tenant_id: tenant_id, p_days: 60, p_limit: 5 }),
+  ]);
+
+  const snapshotText = summary ? JSON.stringify(summary, null, 2) : "No data available";
+  const topSvcText = (topServices ?? []).map((s: Record<string, unknown>) =>
+    `  • ${(s.services as Record<string, string>)?.name}: ${s.count} bookings`
+  ).join("\n") || "  None";
+  const churnText = (churnRisk ?? []).map((c: Record<string, unknown>) =>
+    `  • Customer ${c.customer_id} — last seen ${c.last_booking_date}`
+  ).join("\n") || "  None identified";
+
+  const systemPrompt = `You are an AI business coach for African service businesses on the Kajola SCOS platform.
+You have access to this business's last 30-day performance data. Give specific, actionable advice.
+
+BUSINESS SNAPSHOT (last 30 days):
+${snapshotText}
+
+TOP SERVICES BY REVENUE:
+${topSvcText}
+
+CHURN-RISK CUSTOMERS:
+${churnText}
+
+Guidelines:
+- Ground every recommendation in the data provided — no generic advice.
+- When you recommend an action (e.g. run a win-back campaign), specify which Kajola feature enables it.
+- Use local currency context (NGN/KES/GHS). Express revenue in thousands (e.g. ₦1.2M, KES 450K).
+- Limit the response to 3 actionable insights, ordered by impact. Use bullet points.
+- If the data is insufficient to answer confidently, say so and suggest which metric to check.`;
+
+  const stream = anthropic.messages.stream({
+    model:      "claude-opus-5",
+    max_tokens: 600,
+    system:     systemPrompt,
+    messages:   [{ role: "user", content: question }],
+  });
+
+  const readable = new ReadableStream({
+    async start(controller) {
+      for await (const chunk of stream) {
+        if (
+          chunk.type === "content_block_delta" &&
+          chunk.delta.type === "text_delta"
+        ) {
+          controller.enqueue(new TextEncoder().encode(chunk.delta.text));
+        }
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type":     "text/plain; charset=utf-8",
+      "Transfer-Encoding": "chunked",
+      "X-Accel-Buffering": "no",
+    },
+  });
+});
+```
+
+Required env vars: `ANTHROPIC_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+**Companion SQL — business_snapshot_30d RPC:**
+
+```sql
+CREATE OR REPLACE FUNCTION business_snapshot_30d(p_tenant_id uuid)
+RETURNS jsonb LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT jsonb_build_object(
+    'total_bookings',    COUNT(*) FILTER (WHERE status IN ('completed','confirmed','in_progress')),
+    'completed',         COUNT(*) FILTER (WHERE status = 'completed'),
+    'cancelled',         COUNT(*) FILTER (WHERE status = 'cancelled'),
+    'no_show',           COUNT(*) FILTER (WHERE status = 'no_show'),
+    'revenue_kobo',      COALESCE(SUM(total_amount_kobo) FILTER (WHERE status = 'completed'), 0),
+    'avg_order_kobo',    COALESCE(AVG(total_amount_kobo) FILTER (WHERE status = 'completed'), 0),
+    'unique_customers',  COUNT(DISTINCT customer_id) FILTER (WHERE status = 'completed'),
+    'new_customers',     COUNT(DISTINCT customer_id) FILTER (
+                           WHERE status = 'completed'
+                           AND customer_id NOT IN (
+                             SELECT DISTINCT customer_id FROM bookings
+                             WHERE tenant_id = p_tenant_id
+                               AND created_at < now() - interval '30 days'
+                               AND status = 'completed'
+                           )),
+    'cancellation_rate', ROUND(
+                           100.0 * COUNT(*) FILTER (WHERE status = 'cancelled') /
+                           NULLIF(COUNT(*), 0), 1)
+  )
+  FROM bookings
+  WHERE tenant_id = p_tenant_id
+    AND created_at >= now() - interval '30 days';
+$$;
+
+CREATE OR REPLACE FUNCTION churn_risk_customers(
+  p_tenant_id uuid,
+  p_days      integer DEFAULT 60,
+  p_limit     integer DEFAULT 10
+) RETURNS TABLE(customer_id uuid, last_booking_date date, lifetime_bookings bigint)
+LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT
+    customer_id,
+    MAX(created_at)::date AS last_booking_date,
+    COUNT(*)              AS lifetime_bookings
+  FROM bookings
+  WHERE tenant_id = p_tenant_id
+    AND status = 'completed'
+  GROUP BY customer_id
+  HAVING MAX(created_at) < now() - (p_days || ' days')::interval
+     AND COUNT(*) >= 2
+  ORDER BY last_booking_date ASC
+  LIMIT p_limit;
+$$;
+```
+
+**Integration notes**:
+- Expose via the owner/admin dashboard "AI Insights" tab — one question field, streaming response panel
+- Cache responses for identical `(tenant_id, question)` pairs for 1 hour using `ai_coach_cache` table to reduce API costs
+- For the Business Coach, never stream raw customer PII — the churn list shows only `customer_id`; join display names only in the frontend with a separate authenticated query
