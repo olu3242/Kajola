@@ -1,192 +1,167 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 
-type Payment = { status: string; amount_cents: number; reference?: string; provider_reference?: string };
 type Booking = {
-  id: string;
-  status: string;
-  payment_mode?: 'instant' | 'escrow';
-  created_at: string;
-  notes?: string;
-  services?: { name: string; price_cents: number; currency: string };
-  service?: { name: string; price_cents: number; currency: string };
-  artisans?: { business_name: string };
-  artisan?: { business_name: string };
-  payments?: Payment[];
-  escrow_accounts?: Array<{ status: string; amount: number; currency: string; milestones?: Array<{ name: string; status: string }> }>;
-  reviews?: Array<{ id: string }>;
+  id: string; status: string; starts_at: string; ends_at: string;
+  total_amount_kobo: number; deposit_amount_kobo: number;
+  deposit_paid_at: string | null; service_name?: string; provider_name?: string;
+  payment_ref?: string | null;
 };
 
-const reviewTags = ['fast', 'professional', 'clean', 'great_value', 'on_time', 'late', 'rude', 'poor_quality'];
+export default function BookingDetailPage() {
+  const params    = useParams<{ bookingId: string }>();
+  const bookingId = params?.bookingId ?? '';
+  const router    = useRouter();
 
-export default function BookingDetailPage({ params }: { params: { bookingId: string } }) {
-  const [booking, setBooking] = useState<Booking | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [booking,   setBooking]   = useState<Booking | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [rating, setRating] = useState(5);
-  const [comment, setComment] = useState('');
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
-  const service = booking?.services ?? booking?.service;
-  const artisan = booking?.artisans ?? booking?.artisan;
-  const payment = booking?.payments?.[0];
-  const escrow = booking?.escrow_accounts?.[0];
-  const timeline = booking?.payment_mode === 'escrow'
-    ? ['pending', 'awaiting_payment', 'in_progress', 'completed']
-    : ['pending', 'awaiting_payment', 'confirmed', 'completed'];
-  const canCancel = booking && ['pending', 'awaiting_payment', 'confirmed', 'in_progress'].includes(booking.status);
-  const canRetry = booking && ['pending', 'awaiting_payment'].includes(booking.status) && payment?.status !== 'successful';
-  const appointmentText = useMemo(() => booking ? new Date(booking.created_at).toLocaleString() : '', [booking]);
+  // Review state
+  const [rating,   setRating]   = useState(5);
+  const [comment,  setComment]  = useState('');
+  const [reviewed, setReviewed] = useState(false);
 
-  async function loadBooking(silent = false) {
-    if (!silent) setLoading(true);
-    const token = window.localStorage.getItem('kajola_access_token');
-    if (!token) {
-      setError('Sign in to view this booking');
-      setLoading(false);
-      return;
-    }
-    const res = await fetch(`/api/bookings/${params.bookingId}`, { headers: { Authorization: `Bearer ${token}` } });
+  // Gratuity state
+  const [tipKobo,  setTipKobo]  = useState(50000); // ₦500
+  const [tipped,   setTipped]   = useState(false);
+
+  async function loadBooking() {
+    const res  = await fetch(`/api/bookings/${bookingId}`);
     const data = await res.json();
-    if (!res.ok) setError(data.error ?? 'Unable to load booking');
-    else {
-      setBooking(data.booking);
-      setError('');
-    }
+    if (!res.ok) setError(data.error ?? 'Unable to load');
+    else setBooking(data.booking ?? null);
     setLoading(false);
   }
 
-  useEffect(() => {
-    loadBooking();
-  }, [params.bookingId]);
-
-  useEffect(() => {
-    if (!booking || booking.status !== 'awaiting_payment') return;
-    const id = window.setInterval(() => loadBooking(true), 4000);
-    return () => window.clearInterval(id);
-  }, [booking?.status, params.bookingId]);
+  useEffect(() => { if (bookingId) loadBooking(); }, [bookingId]);
 
   async function cancelBooking() {
     setSubmitting(true);
-    setError('');
-    const token = window.localStorage.getItem('kajola_access_token');
-    const res = await fetch(`/api/bookings/${params.bookingId}/status`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ status: 'cancelled' })
+    const res  = await fetch(`/api/bookings/${bookingId}/status`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'cancelled' }),
     });
     const data = await res.json();
-    if (!res.ok) setError(data.error ?? 'Unable to cancel booking');
+    setSubmitting(false);
+    if (!res.ok) setError(data.error ?? 'Could not cancel');
     else setBooking(data.booking);
-    setSubmitting(false);
-  }
-
-  async function retryPayment() {
-    setSubmitting(true);
-    setError('');
-    const token = window.localStorage.getItem('kajola_access_token');
-    const res = await fetch('/api/payments/retry', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ bookingId: params.bookingId })
-    });
-    const data = await res.json();
-    setSubmitting(false);
-    if (!res.ok) {
-      setError(data.error ?? 'Unable to retry payment');
-      return;
-    }
-    window.location.href = data.payment_url;
   }
 
   async function submitReview() {
     setSubmitting(true);
-    setError('');
-    const token = window.localStorage.getItem('kajola_access_token');
-    const res = await fetch('/api/reviews', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ booking_id: params.bookingId, rating, comment, tags: selectedTags })
+    const res  = await fetch('/api/reviews', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ booking_id: bookingId, rating, comment }),
     });
     const data = await res.json();
-    if (!res.ok) setError(data.error ?? 'Unable to submit review');
-    else await loadBooking(true);
     setSubmitting(false);
+    if (!res.ok) setError(data.error ?? 'Review failed');
+    else setReviewed(true);
   }
 
+  async function submitTip() {
+    setSubmitting(true);
+    const res  = await fetch('/api/gratuities', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ booking_id: bookingId, amount_kobo: tipKobo }),
+    });
+    const data = await res.json();
+    setSubmitting(false);
+    if (!res.ok) setError(data.error ?? 'Tip failed');
+    else setTipped(true);
+  }
+
+  async function rebook() {
+    if (!booking) return;
+    router.push(`/discovery/${booking.provider_name?.replace(/\s+/g, '-').toLowerCase()}`);
+  }
+
+  if (loading) return <main style={{ padding: 32 }}><p>Loading…</p></main>;
+  if (!booking) return <main style={{ padding: 32 }}><p style={{ color: '#b91c1c' }}>{error || 'Not found.'}</p><a href="/dashboard">Back</a></main>;
+
+  const canCancel    = ['held', 'awaiting_payment', 'confirmed'].includes(booking.status);
+  const isCompleted  = booking.status === 'completed';
+  const depositPaid  = !!booking.deposit_paid_at;
+
   return (
-    <main style={{ padding: 32, fontFamily: 'system-ui, sans-serif', maxWidth: 860, margin: '0 auto' }}>
-      <a href="/dashboard" style={{ color: '#2563eb' }}>Back</a>
-      <h1>Booking detail</h1>
-      {loading ? <p>Loading...</p> : null}
-      {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
-      {booking ? (
-        <section style={{ padding: 20, borderRadius: 8, background: '#f8fafc', border: '1px solid #e5e7eb' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-            <h2 style={{ margin: 0 }}>{service?.name ?? 'Service'}</h2>
-            <span style={{ padding: '6px 10px', borderRadius: 999, background: booking.status === 'confirmed' ? '#dcfce7' : '#fef3c7' }}>{booking.status}</span>
-          </div>
-          <p>Artisan: {artisan?.business_name ?? 'Assigned artisan'}</p>
-          <p>Amount: {(service?.currency ?? 'NGN')} {((service?.price_cents ?? payment?.amount_cents ?? 0) / 100).toLocaleString()}</p>
-          <p>Scheduled time: {appointmentText}</p>
-          <p>Payment status: {payment?.status ?? 'pending'}</p>
-          <p>Payment mode: {booking.payment_mode === 'escrow' ? 'Kajola Secure Escrow' : 'Instant direct payment'}</p>
-          <div style={{ marginTop: 18, display: 'grid', gap: 8 }}>
-            {timeline.map((step) => (
-              <div key={step} style={{ color: timeline.indexOf(step) <= Math.max(timeline.indexOf(booking.status), 0) ? '#166534' : '#6b7280' }}>
-                {step === booking.status ? '●' : '○'} {step}
-              </div>
+    <main style={{ padding: 32, fontFamily: 'system-ui, sans-serif', maxWidth: 700, margin: '0 auto' }}>
+      <a href="/dashboard" style={{ color: '#2563eb', fontSize: 14 }}>← My bookings</a>
+
+      <h1 style={{ marginTop: 16 }}>{booking.service_name ?? 'Booking'}</h1>
+
+      <div style={{ padding: 20, background: '#f8fafc', borderRadius: 10, border: '1px solid #E5E7EB', marginTop: 16 }}>
+        <p><strong>Provider:</strong> {booking.provider_name}</p>
+        <p><strong>When:</strong> {new Date(booking.starts_at).toLocaleString('en-NG', { dateStyle: 'full', timeStyle: 'short' })}</p>
+        <p><strong>Status:</strong> <span style={{ textTransform: 'capitalize', fontWeight: 600 }}>{booking.status.replace('_', ' ')}</span></p>
+        <p><strong>Total:</strong> ₦{(booking.total_amount_kobo / 100).toLocaleString()}</p>
+        <p><strong>Deposit:</strong> ₦{(booking.deposit_amount_kobo / 100).toLocaleString()} {depositPaid ? '✓ Paid' : '(not yet paid)'}</p>
+        {booking.payment_ref && <p style={{ fontSize: 12, color: '#9CA3AF' }}>Ref: {booking.payment_ref}</p>}
+      </div>
+
+      {error && <p style={{ color: '#b91c1c', marginTop: 12 }}>{error}</p>}
+
+      <div style={{ marginTop: 20, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {canCancel && (
+          <button onClick={cancelBooking} disabled={submitting} data-testid="cancel-booking-btn"
+            style={{ padding: '12px 18px', borderRadius: 8, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+            Cancel booking
+          </button>
+        )}
+        {isCompleted && (
+          <button onClick={rebook}
+            style={{ padding: '12px 18px', borderRadius: 8, border: '1px solid #D9922A', background: '#fff', color: '#D9922A', cursor: 'pointer', fontWeight: 600 }}>
+            Book again
+          </button>
+        )}
+      </div>
+
+      {/* Gratuity */}
+      {isCompleted && !tipped && (
+        <section style={{ marginTop: 28, padding: 20, background: '#fffbeb', border: '1px solid #FCD34D', borderRadius: 10 }}>
+          <h3 style={{ margin: 0 }}>Send a tip 💛</h3>
+          <p style={{ color: '#78350F', fontSize: 14 }}>100% goes directly to your provider.</p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+            {[20000, 50000, 100000, 200000].map((amt) => (
+              <button key={amt} onClick={() => setTipKobo(amt)}
+                style={{ padding: '8px 16px', borderRadius: 999, border: `2px solid ${tipKobo === amt ? '#D9922A' : '#D1D5DB'}`, background: tipKobo === amt ? '#D9922A' : '#fff', color: tipKobo === amt ? '#fff' : '#111', cursor: 'pointer' }}>
+                ₦{(amt / 100).toLocaleString()}
+              </button>
             ))}
           </div>
-          {booking.payment_mode !== 'escrow' && booking.status === 'confirmed' ? (
-            <div style={{ marginTop: 18 }}>
-              <strong>Your artisan is confirmed</strong>
-              <p>Payment sent to artisan. Contact them before arrival and keep your booking reference handy.</p>
-            </div>
-          ) : null}
-          {booking.payment_mode === 'escrow' ? (
-            <div style={{ marginTop: 18, padding: 16, border: '1px solid #d1d5db', borderRadius: 8, background: '#fff' }}>
-              <strong>Kajola Secure Escrow</strong>
-              <p>Funds held securely until work is completed.</p>
-              <p>Status: {escrow?.status ?? (booking.status === 'in_progress' ? 'held' : 'pending')}</p>
-              {(escrow?.milestones ?? [
-                { name: 'Payment secured', status: booking.status === 'in_progress' ? 'completed' : 'pending' },
-                { name: 'Work in progress', status: booking.status === 'in_progress' ? 'active' : 'pending' },
-                { name: 'Release payout', status: 'pending' }
-              ]).map((milestone) => (
-                <div key={milestone.name}>{milestone.status === 'completed' ? '●' : '○'} {milestone.name}</div>
-              ))}
-            </div>
-          ) : null}
-          <div style={{ marginTop: 20, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {canRetry ? <button onClick={retryPayment} disabled={submitting} style={{ padding: '12px 16px' }}>Retry payment</button> : null}
-            {canCancel ? <button onClick={cancelBooking} disabled={submitting} style={{ padding: '12px 16px', background: '#ef4444', color: '#fff', border: 0 }}>Cancel booking</button> : null}
-            <a href="/dashboard" style={{ padding: '12px 16px', background: '#111827', color: '#fff', textDecoration: 'none' }}>Contact artisan</a>
-          </div>
-          {booking.status === 'completed' && !booking.reviews?.length ? (
-            <section style={{ marginTop: 24, padding: 16, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8 }}>
-              <h3>Rate your experience</h3>
-              <label>
-                Rating
-                <select value={rating} onChange={(event) => setRating(Number(event.target.value))} style={{ marginLeft: 8 }}>
-                  {[5, 4, 3, 2, 1].map((value) => <option key={value} value={value}>{value} stars</option>)}
-                </select>
-              </label>
-              <textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Share what went well or what could improve" style={{ display: 'block', width: '100%', minHeight: 80, marginTop: 12 }} />
-              <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {reviewTags.map((tag) => (
-                  <button key={tag} type="button" onClick={() => setSelectedTags((current) => current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag])} style={{ padding: '8px 10px', borderRadius: 999, border: '1px solid #d1d5db', background: selectedTags.includes(tag) ? '#dcfce7' : '#fff' }}>
-                    {tag}
-                  </button>
-                ))}
-              </div>
-              <button onClick={submitReview} disabled={submitting} style={{ marginTop: 14, padding: '12px 16px' }}>Submit review</button>
-            </section>
-          ) : null}
+          <button onClick={submitTip} disabled={submitting} data-testid="submit-tip-btn"
+            style={{ marginTop: 14, padding: '12px 20px', borderRadius: 8, border: 'none', background: '#D9922A', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+            Send ₦{(tipKobo / 100).toLocaleString()} tip
+          </button>
         </section>
-      ) : null}
+      )}
+      {tipped && <p style={{ color: '#166534', marginTop: 12, fontWeight: 600 }}>✓ Tip sent! Thank you.</p>}
+
+      {/* Review */}
+      {isCompleted && !reviewed && (
+        <section style={{ marginTop: 24, padding: 20, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10 }}>
+          <h3 style={{ margin: 0 }}>Rate your experience</h3>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button key={n} onClick={() => setRating(n)}
+                style={{ fontSize: 24, background: 'none', border: 'none', cursor: 'pointer', opacity: n <= rating ? 1 : 0.3 }}>
+                ⭐
+              </button>
+            ))}
+          </div>
+          <textarea value={comment} onChange={(e) => setComment(e.target.value)}
+            placeholder="How was your experience?" data-testid="review-comment"
+            style={{ display: 'block', width: '100%', minHeight: 80, marginTop: 12, padding: 10, borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14, boxSizing: 'border-box' }} />
+          <button onClick={submitReview} disabled={submitting} data-testid="submit-review-btn"
+            style={{ marginTop: 12, padding: '12px 20px', borderRadius: 8, border: 'none', background: '#111827', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+            Submit review
+          </button>
+        </section>
+      )}
+      {reviewed && <p style={{ color: '#166534', marginTop: 12, fontWeight: 600 }}>✓ Review submitted. Thank you!</p>}
     </main>
   );
 }

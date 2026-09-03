@@ -6,6 +6,8 @@ const PROTECTED_PREFIXES = [
   '/artisan',
   '/admin',
   '/payment',
+  '/booking',
+  '/owner',
 ];
 
 // Routes that redirect authenticated users away
