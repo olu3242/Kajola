@@ -15,10 +15,14 @@
     "jsx": "preserve",
     "baseUrl": ".",
     "paths": {
-      "@kajola/ui": ["packages/ui/src"],
-      "@kajola/api": ["packages/api/src"],
-      "@kajola/db": ["packages/db/src"],
-      "@kajola/automation": ["packages/automation/src"]
+      "@kajola/ui":          ["packages/ui/src"],
+      "@kajola/api":         ["packages/api/src"],
+      "@kajola/db":          ["packages/db/src"],
+      "@kajola/automation":  ["packages/automation/src"],
+      "@kajola/contracts":   ["packages/contracts/src"],
+      "@kajola/runtime-os":  ["packages/runtime-os/src"],
+      "@kajola/workflow-os": ["packages/workflow-os/src"],
+      "@kajola/agent-os":    ["packages/agent-os/src"]
     }
   },
   "include": ["packages/**/*", "apps/**/*"],
