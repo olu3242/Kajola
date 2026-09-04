@@ -39,7 +39,7 @@ async function handleListBookings(supabase: ReturnType<typeof createSupabaseClie
   const status = params.get('status');
   let query = supabase
     .from('bookings')
-    .select('*, services(name, price_cents, currency), artisans(business_name), payments(*), escrow_accounts(*), reviews(id,rating)');
+    .select('*, services(name, price_cents, currency), artisans(business_name), payments(*), escrow_accounts(*), reviews(id,rating), recovery_cases(*, recovery_recommendations(*, booking_slots(start_at,end_at)))');
 
   if (auth.role === 'client') {
     query = query.eq('client_id', auth.sub);
@@ -64,7 +64,7 @@ async function handleListBookings(supabase: ReturnType<typeof createSupabaseClie
 async function handleGetBooking(supabase: ReturnType<typeof createSupabaseClient>, auth: any, bookingId: string) {
   const { data: booking, error } = await supabase
     .from('bookings')
-    .select('*, services(name, price_cents, currency), artisans(business_name), payments(*), escrow_accounts(*), reviews(id,rating)')
+    .select('*, services(name, price_cents, currency), artisans(business_name), payments(*), escrow_accounts(*), reviews(id,rating), recovery_cases(*, recovery_recommendations(*, booking_slots(start_at,end_at)))')
     .eq('id', bookingId)
     .single();
 
@@ -204,7 +204,7 @@ async function handleCreateBooking(supabase: ReturnType<typeof createSupabaseCli
   const { data: held, error: holdError } = await supabase.rpc('create_slot_hold', {
     target_slot_id: slot_id, target_service_id: service_id, target_customer_id: client_id,
     target_tenant_id: tenant_id, target_quote_snapshot_id: quote.id, request_key: requestKey,
-    hold_minutes: 15, target_staff_id: staff_id ?? null,
+    hold_minutes: 5, target_staff_id: staff_id ?? null,
   });
   if (holdError || !held) {
     const conflict = holdError?.message?.includes('SLOT_UNAVAILABLE') || holdError?.code === '23P01';

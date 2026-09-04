@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const eventResult = await processEvents();
-    await durableRequest('/rest/v1/rpc/release_expired_slot_holds', { method: 'POST', body: JSON.stringify({ batch_size: 100 }) });
+    const expiredHolds = await durableRequest<number>('/rest/v1/rpc/release_expired_slot_holds', { method: 'POST', body: JSON.stringify({ batch_size: 100 }) });
     const flowRuntime = createDurableBookingOrchestrator();
     await flowRuntime.ready;
     const worker = new SupabaseWorkflowWorker({
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     });
     const workResult = await worker.runOnce();
     const resumedTimers = await resumeDueFlows(flowRuntime.orchestrator, flowRuntime.repository);
-    return NextResponse.json({ status: 'ok', mode: runtimeMode, events: eventResult, work: workResult, resumed_timers: resumedTimers });
+    return NextResponse.json({ status: 'ok', mode: runtimeMode, events: eventResult, expired_holds: expiredHolds, work: workResult, resumed_timers: resumedTimers });
   } catch (error) {
     return NextResponse.json({ code: 'DEPENDENCY_UNAVAILABLE', message: error instanceof Error ? error.message : 'Worker failed' }, { status: 503 });
   }

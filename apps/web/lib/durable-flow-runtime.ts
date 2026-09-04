@@ -94,6 +94,15 @@ export async function deliverDurableBookingEvent(event: DurableSystemEvent) {
   const { repository, orchestrator, ready } = createDurableBookingOrchestrator();
   await ready;
   const bookingId = String(event.payload.booking_id ?? event.payload.id ?? event.aggregate_id ?? '');
+  if (event.event_type === 'payment.succeeded') {
+    const booking = await selectOne<{ booking_state?: string; recovery_state?: string }>('bookings', `id=eq.${encodeURIComponent(bookingId)}&select=booking_state,recovery_state`);
+    if (booking.booking_state === 'REQUIRES_RECOVERY' || ['REQUIRED', 'ALTERNATIVES_AVAILABLE', 'AWAITING_CUSTOMER', 'REFUND_REQUIRED'].includes(booking.recovery_state ?? '')) {
+      // Financial truth is already committed atomically. Keep the normal
+      // fulfillment flow waiting until explicit customer acceptance emits
+      // booking.confirmed; never send a false confirmation here.
+      return { recoveryRequired: true, bookingId };
+    }
+  }
   const existing = await repository.findInstances({ workflowId: bookingId, tenantId: event.tenant_id });
   if (!existing[0]) {
     if (event.event_type === 'booking.held') return startDurableBookingFlow(event);

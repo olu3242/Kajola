@@ -20,56 +20,44 @@ async function handleWebhook(body: any, rawBody: string) {
   if (!reference) throw new ApiError('Payment reference missing', 400);
 
   const providerEventId = String(body.data?.id ?? await sha256(`${event}:${reference}:${rawBody}`));
-  const { data: accepted, error: eventError } = await supabase.from('provider_events').upsert({
+  const { error: eventError } = await supabase.from('provider_events').upsert({
     provider: 'paystack', provider_event_id: providerEventId, event_type: String(event),
     provider_reference: String(reference), signature_valid: true, payload: body, status: 'VERIFIED'
-  }, { onConflict: 'provider,provider_event_id', ignoreDuplicates: true }).select('id').maybeSingle();
+  }, { onConflict: 'provider,provider_event_id', ignoreDuplicates: true });
   if (eventError) throw new ApiError(eventError.message, 500);
-  if (!accepted) return json({ success: true, cached: true, event_id: providerEventId });
+
+  // A receipt is not the business effect. Replays must retry VERIFIED/FAILED
+  // receipts so a crash between receipt and processing cannot strand money.
+  const { data: receipt, error: receiptError } = await supabase.from('provider_events')
+    .select('status').eq('provider', 'paystack').eq('provider_event_id', providerEventId).single();
+  if (receiptError || !receipt) throw new ApiError(receiptError?.message ?? 'Provider event receipt missing', 500);
+  if (receipt.status === 'PROCESSED') return json({ success: true, cached: true, event_id: providerEventId });
 
   const { data: payment, error } = await supabase.from('payments').select('*').eq('reference', reference).single();
   if (error || !payment) throw new ApiError('Payment record not found', 404);
-  if (payment.status === 'successful') {
-    await markProviderEvent(supabase, providerEventId, 'PROCESSED');
-    return json({ success: true, cached: true, event_id: providerEventId });
-  }
-
   const reportedSuccessful = ['charge.success', 'success', 'paid', 'completed'].includes(String(event).toLowerCase())
     || ['success', 'succeeded'].includes(String(body.data?.status).toLowerCase());
   const verification = reportedSuccessful ? await verifyPaystackTransaction(String(reference)) : { ok: false, raw: body };
-  const successful = reportedSuccessful && verification.ok;
-  const nextStatus = successful ? 'successful' : 'failed';
-
-  const { data: updatedPayments, error: updateError } = await supabase
-    .from('payments')
-    .update({ status: nextStatus, raw_response: { webhook: body, verification: verification.raw }, paid_at: successful ? new Date().toISOString() : payment.paid_at })
-    .eq('id', payment.id).neq('status', 'successful').select('id');
-  if (updateError) throw new ApiError(updateError.message, 500);
-  if (!updatedPayments?.length) {
-    await markProviderEvent(supabase, providerEventId, 'PROCESSED');
-    return json({ success: true, cached: true, event_id: providerEventId });
-  }
+  const verifiedAmount = Number((verification.raw as any)?.data?.amount ?? -1);
+  const verifiedCurrency = String((verification.raw as any)?.data?.currency ?? '').toUpperCase();
+  const expectedAmount = Number(payment.amount_cents ?? payment.amount ?? 0);
+  const expectedCurrency = String(payment.currency ?? 'NGN').toUpperCase();
+  const bindingValid = (verification.raw as any)?.data?.reference === reference
+    && verifiedAmount === expectedAmount && verifiedCurrency === expectedCurrency;
+  const successful = reportedSuccessful && verification.ok && bindingValid;
 
   if (successful) {
-    const { data: booking, error: bookingError } = await supabase
-      .from('bookings')
-      .select('client_id, artisan_id, tenant_id, payment_mode')
-      .eq('id', payment.booking_id)
-      .single();
-    if (bookingError || !booking) throw new ApiError('Booking not found', 404);
-
-    await recordLedger(supabase, payment, booking);
-
-    if (booking.payment_mode === 'escrow') {
-      const { error: escrowError } = await supabase.rpc('create_booking_escrow', { target_booking_id: payment.booking_id, target_payment_id: payment.id });
-      if (escrowError) throw new ApiError(escrowError.message, 500);
-      const { error: progressError } = await supabase.rpc('mark_booking_in_progress', { target_booking_id: payment.booking_id });
-      if (progressError) throw new ApiError(progressError.message, 500);
-    } else {
-      const { error: rpcError } = await supabase.rpc('mark_booking_confirmed', { target_booking_id: payment.booking_id });
-      if (rpcError) throw new ApiError(rpcError.message, 500);
-    }
+    const { data: outcome, error: processError } = await supabase.rpc('process_verified_payment', {
+      target_payment_id: payment.id,
+      target_provider_event_id: providerEventId,
+      target_correlation_id: crypto.randomUUID(),
+      verification_payload: verification.raw,
+    });
+    if (processError) throw new ApiError(processError.message, 500);
+    return json({ success: true, verified: true, event_id: providerEventId, outcome });
   } else {
+    await supabase.from('payments').update({ status: 'failed', raw_response: { webhook: body, verification: verification.raw } })
+      .eq('id', payment.id).neq('status', 'successful');
     await supabase.rpc('fail_payment', { target_booking_id: payment.booking_id });
   }
 
@@ -97,19 +85,6 @@ async function verifyPaystackTransaction(reference: string) {
   });
   const raw = await response.json();
   return { ok: Boolean(response.ok && raw.status && raw.data?.status === 'success' && raw.data?.reference === reference), raw };
-}
-
-async function recordLedger(supabase: ReturnType<typeof createSupabaseClient>, payment: any, booking: any) {
-  const amount = Number(payment.amount_cents ?? payment.amount ?? 0);
-  const kajolaFee = Number(payment.platform_fee_cents ?? 0);
-  const providerReceivable = Number(payment.net_amount_cents ?? Math.max(0, amount - kajolaFee));
-  const rows = [
-    { entry_type: 'DEPOSIT', direction: 'CREDIT', amount, idempotency_key: `payment:${payment.id}:deposit` },
-    ...(kajolaFee > 0 ? [{ entry_type: 'KAJOLA_FEE', direction: 'CREDIT', amount: kajolaFee, idempotency_key: `payment:${payment.id}:kajola-fee` }] : []),
-    ...(providerReceivable > 0 ? [{ entry_type: 'PROVIDER_RECEIVABLE', direction: 'CREDIT', amount: providerReceivable, idempotency_key: `payment:${payment.id}:provider-receivable` }] : []),
-  ].map((row) => ({ ...row, tenant_id: booking.tenant_id, booking_id: payment.booking_id, payment_id: payment.id, currency: payment.currency ?? 'NGN' }));
-  const { error } = await supabase.from('financial_ledger_entries').upsert(rows, { onConflict: 'idempotency_key', ignoreDuplicates: true });
-  if (error) throw new ApiError(error.message, 500);
 }
 
 async function markProviderEvent(supabase: ReturnType<typeof createSupabaseClient>, providerEventId: string, status: string, errorMessage: string | null = null) {

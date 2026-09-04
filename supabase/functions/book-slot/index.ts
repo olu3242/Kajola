@@ -23,7 +23,7 @@ const PAYSTACK_SECRET_KEY = Deno.env.get('PAYSTACK_SECRET_KEY')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-const HOLD_DURATION_MINUTES = 15
+const HOLD_DURATION_MINUTES = 5
 const PG_EXCLUDE_VIOLATION = '23P01'      // EXCLUDE constraint violation
 const PG_UNIQUE_VIOLATION   = '23505'     // duplicate key
 

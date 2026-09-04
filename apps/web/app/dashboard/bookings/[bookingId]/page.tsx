@@ -10,6 +10,8 @@ type Booking = {
   payment_ref?: string | null;
   payment_status?: string; settlement_status?: string;
   amount_paid_kobo?: number; balance_due_kobo?: number;
+  booking_state?: string; fulfillment_state?: string; recovery_state?: string;
+  recovery_cases?: Array<{ id: string; state: string; recovery_recommendations: Array<{ id: string; slot_id?: string; rank: number; status: string; starts_at?: string; booking_slots?: { start_at: string; end_at: string } }> }>;
 };
 
 export default function BookingDetailPage() {
@@ -86,6 +88,22 @@ export default function BookingDetailPage() {
     router.push(`/discovery/${booking.provider_name?.replace(/\s+/g, '-').toLowerCase()}`);
   }
 
+  async function acceptAlternative(caseId: string, recommendationId: string) {
+    setSubmitting(true); setError('');
+    const res = await fetch(`/api/recovery/${caseId}/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recommendation_id: recommendationId }) });
+    const data = await res.json(); setSubmitting(false);
+    if (!res.ok) { setError(data.error ?? 'Alternative is no longer available.'); return; }
+    await loadBooking();
+  }
+
+  async function requestRefund(caseId: string) {
+    setSubmitting(true); setError('');
+    const res = await fetch(`/api/recovery/${caseId}/refund`, { method: 'POST' });
+    const data = await res.json(); setSubmitting(false);
+    if (!res.ok) { setError(data.error ?? 'Refund request could not be recorded.'); return; }
+    await loadBooking();
+  }
+
   if (loading) return <main style={{ padding: 32 }}><p>Loading…</p></main>;
   if (!booking) return <main style={{ padding: 32 }}><p style={{ color: '#b91c1c' }}>{error || 'Not found.'}</p><a href="/dashboard">Back</a></main>;
 
@@ -109,6 +127,15 @@ export default function BookingDetailPage() {
         <p><strong>Settlement:</strong> {(booking.settlement_status ?? 'not due').replace('_', ' ')}</p>
         {booking.payment_ref && <p style={{ fontSize: 12, color: '#9CA3AF' }}>Ref: {booking.payment_ref}</p>}
       </div>
+
+      {booking.booking_state === 'REQUIRES_RECOVERY' || ['REQUIRED', 'AWAITING_CUSTOMER', 'REFUND_REQUIRED'].includes(booking.recovery_state ?? '') ? <section style={{ marginTop: 20, padding: 20, borderRadius: 10, background: '#fffbeb', border: '1px solid #f59e0b' }} data-testid="booking-recovery">
+        <h2 style={{ marginTop: 0 }}>Your payment is protected</h2>
+        <p>{booking.recovery_state === 'REFUND_REQUIRED' ? 'Your refund request is recorded. Settlement remains blocked while it is processed.' : 'We received your payment, but the original slot expired and is no longer available. Choose an alternative below; Kajola will never reassign you automatically. A refund remains available.'}</p>
+        {(booking.recovery_cases?.[0]?.recovery_recommendations ?? []).filter((item) => item.status === 'OFFERED').map((item) => <button key={item.id} disabled={submitting} onClick={() => acceptAlternative(booking.recovery_cases![0].id, item.id)} className="kj-btn kj-btn--secondary" style={{ marginRight: 8, marginBottom: 8 }}>
+          Accept option {item.rank}{item.booking_slots?.start_at || item.starts_at ? ` · ${new Date(item.booking_slots?.start_at ?? item.starts_at!).toLocaleString('en-NG')}` : ''}
+        </button>)}
+        {booking.recovery_cases?.[0] && booking.recovery_state !== 'REFUND_REQUIRED' ? <button disabled={submitting} onClick={() => requestRefund(booking.recovery_cases![0].id)} className="kj-btn kj-btn--secondary">Request a refund</button> : null}
+      </section> : null}
 
       {error && <p style={{ color: '#b91c1c', marginTop: 12 }}>{error}</p>}
 

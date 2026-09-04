@@ -96,7 +96,9 @@ async function initiatePayment(supabase: ReturnType<typeof createSupabaseClient>
 
   const { data: updatedBooking, error: updateError } = await supabase
     .from('bookings')
-    .update({ status: ['held', 'pending'].includes(booking.status) ? 'awaiting_payment' : booking.status, total_amount: finalAmount, payment_reference: reference })
+    .update({ status: ['held', 'pending'].includes(booking.status) ? 'awaiting_payment' : booking.status,
+      booking_state: ['held', 'pending'].includes(booking.status) ? 'PENDING_PAYMENT' : booking.booking_state,
+      payment_state: 'INTENT_CREATED', total_amount: finalAmount, payment_reference: reference })
     .eq('id', booking_id)
     .select()
     .single();
@@ -141,27 +143,33 @@ async function verifyPayment(supabase: ReturnType<typeof createSupabaseClient>, 
   }
 
   const result = await verifyWithProvider(payment.provider, reference);
-  if (!result.ok) {
+  const providerData = (result.raw as any)?.data ?? result.raw;
+  const bindingValid = String(providerData?.reference ?? reference) === reference
+    && Number(providerData?.amount ?? payment.amount_cents) === Number(payment.amount_cents)
+    && String(providerData?.currency ?? payment.currency).toUpperCase() === String(payment.currency).toUpperCase();
+  if (!result.ok || !bindingValid) {
     await supabase.from('payments').update({ status: 'failed', raw_response: result.raw }).eq('id', payment.id);
-    return json({ success: false, booking, payment_status: 'failed', raw_response: result.raw }, 402);
+    return json({ success: false, booking, payment_status: 'failed', error: 'Provider verification did not match the payment binding' }, 402);
   }
-
-  const { error: payError } = await supabase
-    .from('payments')
-    .update({ status: 'successful', raw_response: result.raw, paid_at: new Date().toISOString() })
-    .eq('id', payment.id);
-  if (payError) throw new ApiError(payError.message, 500);
-
-  if (booking.payment_mode === 'escrow') {
-    const { error: escrowError } = await supabase.rpc('create_booking_escrow', { target_booking_id: bookingId, target_payment_id: payment.id });
-    if (escrowError) throw new ApiError(escrowError.message, 500);
-    const { error: progressError } = await supabase.rpc('mark_booking_in_progress', { target_booking_id: bookingId });
-    if (progressError) throw new ApiError(progressError.message, 500);
-  } else {
-    const { error: rpcError } = await supabase.rpc('mark_booking_confirmed', { target_booking_id: bookingId });
-    if (rpcError) throw new ApiError(rpcError.message, 500);
-  }
-  return json({ success: true, booking: await getBooking(supabase, bookingId) });
+  const providerEventId = `manual-verify:${payment.id}`;
+  const { error: receiptError } = await supabase.from('provider_events').upsert({
+    provider: payment.provider,
+    provider_event_id: providerEventId,
+    event_type: 'server.verify.success',
+    provider_reference: reference,
+    signature_valid: true,
+    payload: result.raw,
+    status: 'VERIFIED',
+  }, { onConflict: 'provider,provider_event_id', ignoreDuplicates: true });
+  if (receiptError) throw new ApiError(receiptError.message, 500);
+  const { data: outcome, error: processError } = await supabase.rpc('process_verified_payment', {
+    target_payment_id: payment.id,
+    target_provider_event_id: providerEventId,
+    target_correlation_id: crypto.randomUUID(),
+    verification_payload: result.raw,
+  });
+  if (processError) throw new ApiError(processError.message, 500);
+  return json({ success: true, booking: await getBooking(supabase, bookingId), outcome });
 }
 
 async function retryPayment(supabase: ReturnType<typeof createSupabaseClient>, auth: any, body: any) {
@@ -223,7 +231,7 @@ async function verifyWithProvider(provider: string, reference: string): Promise<
     if (!key) throw new ApiError('DEPENDENCY_UNAVAILABLE: PAYSTACK_SECRET_KEY_MISSING', 503);
     const res = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, { headers: { Authorization: `Bearer ${key}` } });
     const raw = await res.json();
-    return { ok: Boolean(res.ok && raw.status && raw.data?.status === 'success'), status: raw.data?.status ?? 'failed', raw };
+    return { ok: Boolean(res.ok && raw.status && raw.data?.status === 'success' && raw.data?.reference === reference), status: raw.data?.status ?? 'failed', raw };
   }
   if (provider === 'stripe') {
     const key = Deno.env.get('STRIPE_SECRET_KEY');

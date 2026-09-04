@@ -184,6 +184,9 @@ export async function startBookingFlow(booking: StoreBooking, event: StoreDomain
 export async function processBookingFlowEvent(booking: StoreBooking, event: StoreDomainEvent, user: StoreUser) {
   await ready();
   const instances = await bookingOrchestrator.repository.findInstances({ workflowId: booking.id, tenantId: booking.tenant_id });
+  if (event.event_type === 'payment.succeeded' && booking.booking_state === 'REQUIRES_RECOVERY') {
+    return instances.map((instance) => instance);
+  }
   const flowEvent = toFlowEvent(event, user);
   const active = instances.filter((instance) => !['COMPLETED', 'CANCELLED', 'COMPENSATED'].includes(instance.status));
   if (['cancelled', 'no_show', 'disputed'].includes(booking.status)) {

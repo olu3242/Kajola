@@ -187,6 +187,19 @@ export async function holdSlot(
   const slotStart = new Date(body.starts_at).getTime();
   const slotEnd = new Date(body.ends_at).getTime();
 
+  // Local/test mode mirrors the durable expiry transition. Connected modes use
+  // release_expired_slot_holds under the worker lease.
+  for (const candidate of store.bookings) {
+    if (candidate.hold_state === 'ACTIVE' && candidate.held_until && new Date(candidate.held_until).getTime() <= Date.now()) {
+      candidate.status = 'expired';
+      candidate.booking_state = 'EXPIRED';
+      candidate.hold_state = 'EXPIRED';
+      candidate.fulfillment_state = 'NOT_SCHEDULED';
+      candidate.settlement_status = 'not_due';
+      candidate.settlement_state = 'NOT_ELIGIBLE';
+    }
+  }
+
   // Conflict check
   const conflict = store.bookings.find((b) => {
     if (b.provider_id !== body.provider_id) return false;
@@ -201,7 +214,7 @@ export async function holdSlot(
   }
 
   const now = new Date();
-  const heldUntil = new Date(now.getTime() + 15 * 60 * 1000); // 15 minutes
+  const heldUntil = new Date(now.getTime() + 5 * 60 * 1000);
 
   const booking: StoreBooking = {
     id: randomUUID(),
@@ -214,6 +227,13 @@ export async function holdSlot(
     starts_at: body.starts_at,
     ends_at: body.ends_at,
     held_until: heldUntil.toISOString(),
+    held_at: now.toISOString(),
+    booking_state: 'HELD',
+    payment_state: 'INTENT_REQUIRED',
+    hold_state: 'ACTIVE',
+    fulfillment_state: 'NOT_SCHEDULED',
+    settlement_state: 'NOT_ELIGIBLE',
+    recovery_state: 'NONE',
     total_amount_kobo: service.price_kobo,
     deposit_amount_kobo: depositFor(service.price_kobo, provider.payment_policy ?? DEFAULT_COMMERCE_POLICY),
     deposit_paid_at: null,
@@ -291,11 +311,18 @@ export async function initPayment(
   // Update booking status
   const isInitialConfirmation = ['held', 'awaiting_payment'].includes(booking.status);
   if (isInitialConfirmation) booking.status = 'awaiting_payment';
+  if (isInitialConfirmation) booking.booking_state = 'PENDING_PAYMENT';
+  booking.payment_state = 'INTENT_CREATED';
   booking.payment_status = 'pending';
   booking.payment_ref = reference;
 
   if (method === 'pay_at_venue') {
     booking.status = 'confirmed';
+    booking.booking_state = 'CONFIRMED';
+    booking.hold_state = 'CONVERTED';
+    booking.fulfillment_state = 'SCHEDULED';
+    booking.payment_state = 'NOT_REQUIRED';
+    booking.settlement_state = 'PENDING_ELIGIBILITY';
     booking.payment_status = booking.amount_paid_kobo > 0 ? 'partially_paid' : 'unpaid';
   }
   recordDomainChange({ eventType: 'payment.intent_created', actor: user, tenantId: booking.tenant_id, aggregateType: 'payment', aggregateId: payment.id, newState: { status: payment.status }, payload: { booking_id: booking.id, reference, method, purpose: payment.purpose, amount_kobo: payment.amount_kobo } });
@@ -338,15 +365,44 @@ export async function verifyPayment(
   booking.amount_paid_kobo = Math.min(booking.total_amount_kobo, booking.amount_paid_kobo + payment.subtotal_kobo);
   booking.balance_due_kobo = Math.max(0, booking.total_amount_kobo - booking.amount_paid_kobo);
   booking.payment_status = booking.balance_due_kobo === 0 ? 'paid' : 'partially_paid';
-  booking.settlement_status = 'pending';
+  booking.payment_state = 'CONFIRMED';
+  const requiresHoldConversion = payment.purpose !== 'balance' && ['held', 'awaiting_payment', 'expired'].includes(booking.status);
+  const holdStillOwned = !requiresHoldConversion || (booking.hold_state === 'ACTIVE' && !!booking.held_until
+    && new Date(booking.held_until).getTime() > Date.now()
+    && ['held', 'awaiting_payment'].includes(booking.status));
+  booking.settlement_status = holdStillOwned ? 'pending' : 'not_due';
+  booking.settlement_state = holdStillOwned ? 'PENDING_ELIGIBILITY' : 'HELD';
   if (payment.purpose === 'deposit') booking.deposit_paid_at = new Date().toISOString();
-  const confirmsBooking = ['held', 'awaiting_payment'].includes(booking.status);
-  if (confirmsBooking) booking.status = 'confirmed';
+  const confirmsBooking = requiresHoldConversion && holdStillOwned;
+  if (confirmsBooking) {
+    booking.status = 'confirmed';
+    booking.booking_state = 'CONFIRMED';
+    booking.hold_state = 'CONVERTED';
+    booking.fulfillment_state = 'SCHEDULED';
+  } else if (requiresHoldConversion) {
+    booking.status = 'requires_recovery';
+    booking.booking_state = 'REQUIRES_RECOVERY';
+    booking.hold_state = 'EXPIRED';
+    booking.fulfillment_state = 'NOT_SCHEDULED';
+    booking.recovery_state = 'AWAITING_CUSTOMER';
+    booking.settlement_status = 'not_due';
+    booking.settlement_state = 'HELD';
+    const alternatives = getAvailableSlots(booking.provider_id, booking.service_id).filter((slot) => slot.available).slice(0, 5);
+    if (!store.recoveryCases.some((item) => item.booking_id === booking.id)) {
+      const recoveryId = randomUUID();
+      store.recoveryCases.push({
+        id: recoveryId, booking_id: booking.id, payment_id: payment.id, state: 'AWAITING_CUSTOMER',
+        failure_reason: 'LATE_PAYMENT_AFTER_HOLD_EXPIRY', policy_version: 'recovery-v1', created_at: new Date().toISOString(),
+        recommendations: alternatives.map((slot, index) => ({ id: randomUUID(), recovery_case_id: recoveryId,
+          provider_id: booking.provider_id, starts_at: slot.starts_at, ends_at: slot.ends_at, rank: index + 1, status: 'OFFERED' })),
+      });
+    }
+  }
 
   const createdAt = new Date().toISOString();
   store.ledger.push(
-    { id: randomUUID(), booking_id: booking.id, payment_id: payment.id, account: 'customer', direction: 'debit', amount_kobo: payment.amount_kobo, event: 'payment_succeeded', created_at: createdAt },
-    { id: randomUUID(), booking_id: booking.id, payment_id: payment.id, account: 'provider', direction: 'credit', amount_kobo: payment.provider_net_kobo, event: 'payment_succeeded', created_at: createdAt },
+    { id: randomUUID(), booking_id: booking.id, payment_id: payment.id, account: 'customer', direction: 'debit', amount_kobo: payment.amount_kobo, event: 'payment_succeeded', created_at: createdAt, idempotency_key: `payment:${payment.id}:customer` },
+    { id: randomUUID(), booking_id: booking.id, payment_id: payment.id, account: 'provider', direction: 'credit', amount_kobo: payment.provider_net_kobo, event: 'payment_succeeded', created_at: createdAt, idempotency_key: `payment:${payment.id}:provider` },
   );
   if (payment.platform_fee_kobo > 0) store.ledger.push({ id: randomUUID(), booking_id: booking.id, payment_id: payment.id, account: 'platform', direction: 'credit', amount_kobo: payment.platform_fee_kobo, event: 'payment_succeeded', created_at: createdAt });
   if (payment.gateway_fee_kobo > 0) store.ledger.push({ id: randomUUID(), booking_id: booking.id, payment_id: payment.id, account: 'gateway', direction: 'credit', amount_kobo: payment.gateway_fee_kobo, event: 'payment_succeeded', created_at: createdAt });
@@ -357,6 +413,54 @@ export async function verifyPayment(
   await processBookingFlowEvent(booking, paymentEvent, user);
 
   return { success: true, booking };
+}
+
+export function getRecoveryCase(user: StoreUser, bookingId: string) {
+  const booking = store.bookings.find((item) => item.id === bookingId);
+  if (!booking || (user.role === 'client' && booking.client_id !== user.id)) return null;
+  if (user.role !== 'client' && user.role !== 'admin' && booking.tenant_id !== user.tenant_id) return null;
+  return store.recoveryCases.find((item) => item.booking_id === bookingId) ?? null;
+}
+
+export async function acceptRecoveryRecommendation(user: StoreUser, recoveryCaseId: string, recommendationId: string) {
+  const recovery = store.recoveryCases.find((item) => item.id === recoveryCaseId);
+  const booking = recovery && store.bookings.find((item) => item.id === recovery.booking_id);
+  if (!recovery || !booking) return { error: 'Recovery case not found' };
+  if (user.role !== 'client' || booking.client_id !== user.id) return { error: 'Forbidden' };
+  if (recovery.state === 'ACCEPTED') return { booking, recovery };
+  const recommendation = recovery.recommendations.find((item) => item.id === recommendationId && item.status === 'OFFERED');
+  if (!recommendation) return { error: 'Recommendation is not available' };
+  const conflict = store.bookings.some((item) => item.id !== booking.id && item.provider_id === recommendation.provider_id
+    && ACTIVE_STATUSES.includes(item.status) && new Date(recommendation.starts_at) < new Date(item.ends_at)
+    && new Date(recommendation.ends_at) > new Date(item.starts_at));
+  if (conflict) return { error: 'Replacement slot is no longer available' };
+  booking.starts_at = recommendation.starts_at; booking.ends_at = recommendation.ends_at;
+  booking.status = 'confirmed'; booking.booking_state = 'CONFIRMED'; booking.hold_state = 'CONVERTED';
+  booking.fulfillment_state = 'SCHEDULED'; booking.recovery_state = 'ACCEPTED'; booking.settlement_status = 'pending';
+  booking.settlement_state = 'PENDING_ELIGIBILITY';
+  recovery.state = 'ACCEPTED'; recommendation.status = 'ACCEPTED';
+  recovery.recommendations.filter((item) => item.id !== recommendation.id).forEach((item) => { item.status = 'REJECTED'; });
+  const event = recordDomainChange({ eventType: 'booking.confirmed', actor: user, tenantId: booking.tenant_id,
+    aggregateType: 'booking', aggregateId: booking.id, newState: { booking_state: booking.booking_state,
+      recovery_state: booking.recovery_state, starts_at: booking.starts_at }, payload: { recovery_case_id: recovery.id, recommendation_id: recommendation.id } });
+  await processBookingFlowEvent(booking, event, user);
+  return { booking, recovery };
+}
+
+export function requestRecoveryRefund(user: StoreUser, recoveryCaseId: string) {
+  const recovery = store.recoveryCases.find((item) => item.id === recoveryCaseId);
+  const booking = recovery && store.bookings.find((item) => item.id === recovery.booking_id);
+  if (!recovery || !booking) return { error: 'Recovery case not found' };
+  if (user.role !== 'client' || booking.client_id !== user.id) return { error: 'Forbidden' };
+  recovery.state = 'REFUND_REQUIRED'; booking.recovery_state = 'REFUND_REQUIRED';
+  booking.payment_state = 'REFUND_PENDING'; booking.settlement_state = 'HELD';
+  const idempotency_key = `recovery-refund:${booking.id}:${recovery.id}:${recovery.policy_version}`;
+  if (!store.events.some((event) => event.event_type === 'recovery.refund.requested' && event.payload.idempotency_key === idempotency_key)) {
+    recordDomainChange({ eventType: 'recovery.refund.requested', actor: user, tenantId: booking.tenant_id,
+      aggregateType: 'booking', aggregateId: booking.id, newState: { recovery_state: booking.recovery_state,
+        payment_state: booking.payment_state, settlement_state: booking.settlement_state }, payload: { recovery_case_id: recovery.id, idempotency_key } });
+  }
+  return { refund: { status: 'REFUND_REQUESTED', idempotency_key } };
 }
 
 export function listBookings(user: StoreUser): StoreBooking[] {
@@ -430,6 +534,12 @@ export async function updateBookingStatus(
   }
 
   booking.status = newStatus as BookingStatus;
+  if (newStatus === 'cancelled') {
+    booking.booking_state = 'CANCELLED'; booking.hold_state = 'RELEASED'; booking.fulfillment_state = 'CANCELLED';
+  } else if (newStatus === 'checked_in') booking.fulfillment_state = 'CUSTOMER_CHECKED_IN';
+  else if (newStatus === 'in_progress') booking.fulfillment_state = 'IN_PROGRESS';
+  else if (newStatus === 'completed') { booking.booking_state = 'COMPLETED'; booking.fulfillment_state = 'COMPLETED'; }
+  else if (newStatus === 'no_show') booking.fulfillment_state = 'NO_SHOW';
   const eventName: Record<string, string> = { cancelled: 'booking.cancelled', checked_in: 'booking.checked_in', in_progress: 'booking.started', completed: 'booking.completed', no_show: 'booking.no_show' };
   const event = recordDomainChange({ eventType: eventName[newStatus] ?? 'booking.updated', actor: user, tenantId: booking.tenant_id, aggregateType: 'booking', aggregateId: booking.id, oldState: { status: current }, newState: { status: booking.status } });
   if (newStatus === 'completed') {

@@ -18,7 +18,8 @@ export async function GET(req: NextRequest, { params }: { params: { bookingId: s
     const service  = store.services.find((s) => s.id === booking.service_id);
     const policy = provider?.payment_policy ?? DEFAULT_COMMERCE_POLICY;
     const quote = quoteCheckout({ totalKobo: booking.total_amount_kobo, paidKobo: booking.amount_paid_kobo, policy });
-    return NextResponse.json({ booking: { ...booking, provider_name: provider?.business_name, service_name: service?.name }, quote });
+    const recoveryCase = store.recoveryCases.find((item) => item.booking_id === booking.id) ?? null;
+    return NextResponse.json({ booking: { ...booking, provider_name: provider?.business_name, service_name: service?.name, recovery_cases: recoveryCase ? [recoveryCase] : [] }, quote });
   }
   return forwardToFunctionWithQuery(`bookings/${params.bookingId}`, req);
 }

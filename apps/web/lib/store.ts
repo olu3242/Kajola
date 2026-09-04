@@ -9,6 +9,8 @@ export type BookingStatus =
   | 'checked_in'
   | 'in_progress'
   | 'completed'
+  | 'requires_recovery'
+  | 'expired'
   | 'cancelled'
   | 'no_show'
   | 'disputed';
@@ -24,6 +26,13 @@ export interface StoreBooking {
   starts_at: string;
   ends_at: string;
   held_until: string | null;
+  held_at: string | null;
+  booking_state: 'DRAFT' | 'HELD' | 'PENDING_PAYMENT' | 'CONFIRMED' | 'REQUIRES_RECOVERY' | 'CANCELLED' | 'EXPIRED' | 'COMPLETED' | 'CLOSED';
+  payment_state: 'NOT_REQUIRED' | 'INTENT_REQUIRED' | 'INTENT_CREATED' | 'PENDING' | 'PARTIALLY_PAID' | 'CONFIRMED' | 'FAILED' | 'EXPIRED' | 'REFUND_PENDING' | 'PARTIALLY_REFUNDED' | 'REFUNDED' | 'DISPUTED';
+  hold_state: 'ACTIVE' | 'CONVERTED' | 'EXPIRED' | 'RELEASED';
+  fulfillment_state: 'NOT_SCHEDULED' | 'SCHEDULED' | 'PROVIDER_ACKNOWLEDGED' | 'CUSTOMER_CHECKED_IN' | 'IN_PROGRESS' | 'COMPLETED' | 'NO_SHOW' | 'CANCELLED' | 'DISPUTED';
+  settlement_state: 'NOT_ELIGIBLE' | 'PENDING_ELIGIBILITY' | 'ELIGIBLE' | 'QUEUED' | 'PROCESSING' | 'SETTLED' | 'FAILED' | 'RETRY_REQUIRED' | 'HELD' | 'REVERSED';
+  recovery_state: 'NONE' | 'REQUIRED' | 'ALTERNATIVES_AVAILABLE' | 'AWAITING_CUSTOMER' | 'ACCEPTED' | 'REFUND_REQUIRED' | 'RESOLVED';
   total_amount_kobo: number;
   deposit_amount_kobo: number;
   deposit_paid_at: string | null;
@@ -134,6 +143,28 @@ export interface StoreLedgerEntry {
   direction: 'debit' | 'credit';
   amount_kobo: number;
   event: 'payment_succeeded' | 'tip_succeeded' | 'refund';
+  created_at: string;
+  idempotency_key?: string;
+}
+
+export interface StoreRecoveryRecommendation {
+  id: string;
+  recovery_case_id: string;
+  provider_id: string;
+  starts_at: string;
+  ends_at: string;
+  rank: number;
+  status: 'OFFERED' | 'ACCEPTED' | 'REJECTED';
+}
+
+export interface StoreRecoveryCase {
+  id: string;
+  booking_id: string;
+  payment_id: string;
+  state: 'REQUIRED' | 'AWAITING_CUSTOMER' | 'ACCEPTED' | 'REFUND_REQUIRED' | 'RESOLVED';
+  failure_reason: 'LATE_PAYMENT_AFTER_HOLD_EXPIRY';
+  policy_version: string;
+  recommendations: StoreRecoveryRecommendation[];
   created_at: string;
 }
 
@@ -389,6 +420,7 @@ const ledger: StoreLedgerEntry[] = [];
 const events: StoreDomainEvent[] = [];
 const audits: StoreAuditRecord[] = [];
 const workflows: StoreWorkflowJob[] = [];
+const recoveryCases: StoreRecoveryCase[] = [];
 
 const initialStore = {
   providers,
@@ -404,6 +436,7 @@ const initialStore = {
   events,
   audits,
   workflows,
+  recoveryCases,
 };
 
 const globalForKajola = globalThis as typeof globalThis & {
