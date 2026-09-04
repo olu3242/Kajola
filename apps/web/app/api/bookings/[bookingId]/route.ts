@@ -3,6 +3,7 @@ import { forwardToFunctionWithQuery } from '../../_proxy';
 import { isLocalMode } from '@/lib/local-mode';
 import { store } from '@/lib/store';
 import { getSessionUser } from '@/lib/session';
+import { DEFAULT_COMMERCE_POLICY, quoteCheckout } from '@/lib/commerce';
 
 export async function GET(req: NextRequest, { params }: { params: { bookingId: string } }) {
   if (isLocalMode) {
@@ -15,7 +16,9 @@ export async function GET(req: NextRequest, { params }: { params: { bookingId: s
     if (user.role === 'artisan' && booking.provider_id  !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     const provider = store.providers.find((p) => p.id === booking.provider_id);
     const service  = store.services.find((s) => s.id === booking.service_id);
-    return NextResponse.json({ booking: { ...booking, provider_name: provider?.business_name, service_name: service?.name } });
+    const policy = provider?.payment_policy ?? DEFAULT_COMMERCE_POLICY;
+    const quote = quoteCheckout({ totalKobo: booking.total_amount_kobo, paidKobo: booking.amount_paid_kobo, policy });
+    return NextResponse.json({ booking: { ...booking, provider_name: provider?.business_name, service_name: service?.name }, quote });
   }
   return forwardToFunctionWithQuery(`bookings/${params.bookingId}`, req);
 }

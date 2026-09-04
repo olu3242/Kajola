@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
 type Booking = {
@@ -8,6 +8,8 @@ type Booking = {
   total_amount_kobo: number; deposit_amount_kobo: number;
   deposit_paid_at: string | null; service_name?: string; provider_name?: string;
   payment_ref?: string | null;
+  payment_status?: string; settlement_status?: string;
+  amount_paid_kobo?: number; balance_due_kobo?: number;
 };
 
 export default function BookingDetailPage() {
@@ -26,18 +28,20 @@ export default function BookingDetailPage() {
   const [reviewed, setReviewed] = useState(false);
 
   // Gratuity state
-  const [tipKobo,  setTipKobo]  = useState(50000); // ₦500
+  const [tipKobo,  setTipKobo]  = useState<number | null>(null);
+  const [customTip, setCustomTip] = useState('');
   const [tipped,   setTipped]   = useState(false);
+  const [tipSkipped, setTipSkipped] = useState(false);
 
-  async function loadBooking() {
+  const loadBooking = useCallback(async function loadBooking() {
     const res  = await fetch(`/api/bookings/${bookingId}`);
     const data = await res.json();
     if (!res.ok) setError(data.error ?? 'Unable to load');
     else setBooking(data.booking ?? null);
     setLoading(false);
-  }
+  }, [bookingId]);
 
-  useEffect(() => { if (bookingId) loadBooking(); }, [bookingId]);
+  useEffect(() => { if (bookingId) loadBooking(); }, [bookingId, loadBooking]);
 
   async function cancelBooking() {
     setSubmitting(true);
@@ -64,10 +68,12 @@ export default function BookingDetailPage() {
   }
 
   async function submitTip() {
+    const amount = customTip ? Math.round(Number(customTip) * 100) : tipKobo;
+    if (!amount || amount <= 0) { setError('Choose a tip amount or select No tip.'); return; }
     setSubmitting(true);
     const res  = await fetch('/api/gratuities', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ booking_id: bookingId, amount_kobo: tipKobo }),
+      body: JSON.stringify({ booking_id: bookingId, amount_kobo: amount }),
     });
     const data = await res.json();
     setSubmitting(false);
@@ -99,6 +105,8 @@ export default function BookingDetailPage() {
         <p><strong>Status:</strong> <span style={{ textTransform: 'capitalize', fontWeight: 600 }}>{booking.status.replace('_', ' ')}</span></p>
         <p><strong>Total:</strong> ₦{(booking.total_amount_kobo / 100).toLocaleString()}</p>
         <p><strong>Deposit:</strong> ₦{(booking.deposit_amount_kobo / 100).toLocaleString()} {depositPaid ? '✓ Paid' : '(not yet paid)'}</p>
+        <p><strong>Payment:</strong> {(booking.payment_status ?? 'unpaid').replace('_', ' ')} · Balance ₦{((booking.balance_due_kobo ?? booking.total_amount_kobo) / 100).toLocaleString()}</p>
+        <p><strong>Settlement:</strong> {(booking.settlement_status ?? 'not due').replace('_', ' ')}</p>
         {booking.payment_ref && <p style={{ fontSize: 12, color: '#9CA3AF' }}>Ref: {booking.payment_ref}</p>}
       </div>
 
@@ -111,6 +119,9 @@ export default function BookingDetailPage() {
             Cancel booking
           </button>
         )}
+        {(booking.balance_due_kobo ?? 0) > 0 && depositPaid && (
+          <button onClick={() => router.push(`/booking/${bookingId}/pay`)} className="kj-btn kj-btn--primary">Pay remaining balance</button>
+        )}
         {isCompleted && (
           <button onClick={rebook}
             style={{ padding: '12px 18px', borderRadius: 8, border: '1px solid #D9922A', background: '#fff', color: '#D9922A', cursor: 'pointer', fontWeight: 600 }}>
@@ -120,25 +131,28 @@ export default function BookingDetailPage() {
       </div>
 
       {/* Gratuity */}
-      {isCompleted && !tipped && (
+      {isCompleted && !tipped && !tipSkipped && (
         <section style={{ marginTop: 28, padding: 20, background: '#fffbeb', border: '1px solid #FCD34D', borderRadius: 10 }}>
           <h3 style={{ margin: 0 }}>Send a tip 💛</h3>
-          <p style={{ color: '#78350F', fontSize: 14 }}>100% goes directly to your provider.</p>
+          <p style={{ color: '#78350F', fontSize: 14 }}>Optional. 100% of the tip is designated for your provider, subject only to payment processing.</p>
           <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-            {[20000, 50000, 100000, 200000].map((amt) => (
-              <button key={amt} onClick={() => setTipKobo(amt)}
+            {[50000, 100000, 200000].map((amt) => (
+              <button key={amt} onClick={() => { setTipKobo(amt); setCustomTip(''); }}
                 style={{ padding: '8px 16px', borderRadius: 999, border: `2px solid ${tipKobo === amt ? '#D9922A' : '#D1D5DB'}`, background: tipKobo === amt ? '#D9922A' : '#fff', color: tipKobo === amt ? '#fff' : '#111', cursor: 'pointer' }}>
                 ₦{(amt / 100).toLocaleString()}
               </button>
             ))}
+            <button onClick={() => { setTipKobo(null); setCustomTip(''); setTipSkipped(true); }} style={{ padding: '8px 16px', borderRadius: 999, border: '2px solid #D1D5DB', background: '#fff', cursor: 'pointer' }}>No tip</button>
           </div>
+          <label style={{ display: 'grid', gap: 6, marginTop: 12 }}>Custom amount (₦)<input type="number" min="1" value={customTip} onChange={(event) => { setCustomTip(event.target.value); setTipKobo(null); }} placeholder="Enter amount" style={{ padding: 10, border: '1px solid #D1D5DB', borderRadius: 8 }} /></label>
           <button onClick={submitTip} disabled={submitting} data-testid="submit-tip-btn"
             style={{ marginTop: 14, padding: '12px 20px', borderRadius: 8, border: 'none', background: '#D9922A', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
-            Send ₦{(tipKobo / 100).toLocaleString()} tip
+            {tipKobo || customTip ? `Send ${customTip ? `₦${Number(customTip).toLocaleString()}` : `₦${((tipKobo ?? 0) / 100).toLocaleString()}`} tip` : 'Choose a tip amount'}
           </button>
         </section>
       )}
       {tipped && <p style={{ color: '#166534', marginTop: 12, fontWeight: 600 }}>✓ Tip sent! Thank you.</p>}
+      {tipSkipped && <p style={{ color: '#374151', marginTop: 12 }}>No tip added. Your receipt is unchanged.</p>}
 
       {/* Review */}
       {isCompleted && !reviewed && (

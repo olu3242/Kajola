@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AppShell } from '../../components/shells';
+import { Alert, Button, Card as SurfaceCard, PageHeader, Skeleton, StatCard } from '../../components/ui';
 
 type Dashboard = {
   generated_at: string;
@@ -30,35 +32,25 @@ function label(value: string) {
   return value.replace(/_/g, ' ');
 }
 
-function Card({ title, value }: { title: string; value: string | number }) {
-  return (
-    <div style={{ padding: 16, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
-      <p style={{ margin: 0, color: '#6b7280', textTransform: 'capitalize' }}>{title}</p>
-      <strong style={{ display: 'block', marginTop: 8, fontSize: 24 }}>{value}</strong>
-    </div>
-  );
-}
-
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section style={{ marginTop: 28 }}><h2>{title}</h2>{children}</section>;
+  return <section style={{ marginTop: 'var(--space-10)' }}><h2 className="kj-heading-2" style={{ marginBottom: 'var(--space-4)' }}>{title}</h2>{children}</section>;
 }
 
 function Cards({ data, moneyKeys = [] }: { data: Record<string, number>; moneyKeys?: string[] }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-      {Object.entries(data).map(([key, value]) => <Card key={key} title={label(key)} value={moneyKeys.includes(key) ? money(value) : value} />)}
+    <div className="kj-grid kj-grid--cards">
+      {Object.entries(data).map(([key, value]) => <StatCard key={key} label={label(key)} value={String(moneyKeys.includes(key) ? money(value) : value)} />)}
     </div>
   );
 }
 
 function RankingTable({ rows }: { rows: Array<{ label: string; count: number }> }) {
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff' }}>
+    <table className="kj-table">
       <tbody>
         {rows.map((row) => (
           <tr key={row.label}>
-            <td style={{ padding: 10, borderBottom: '1px solid #e5e7eb' }}>{row.label}</td>
-            <td style={{ padding: 10, borderBottom: '1px solid #e5e7eb', textAlign: 'right' }}>{row.count}</td>
+            <td>{row.label}</td><td style={{ textAlign: 'right' }}>{row.count}</td>
           </tr>
         ))}
       </tbody>
@@ -105,28 +97,20 @@ export default function AdminDashboardPage() {
     return () => window.clearInterval(id);
   }, []);
 
-  if (error) return <main style={{ padding: 32 }}><p style={{ color: '#b91c1c' }}>{error}</p></main>;
-  if (!dashboard) return <main style={{ padding: 32 }}>Loading operator dashboard...</main>;
+  if (error) return <AppShell persona="admin"><Alert tone="error">{error}</Alert></AppShell>;
+  if (!dashboard) return <AppShell persona="admin"><Skeleton count={5} /></AppShell>;
 
   const maxFunnel = Math.max(dashboard.conversion_funnel.views, 1);
 
   return (
-    <main style={{ padding: 32, fontFamily: 'system-ui, sans-serif', background: '#f9fafb', minHeight: '100vh' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}>
-        <div>
-          <h1 style={{ margin: 0 }}>Operator Dashboard</h1>
-          <p style={{ color: '#6b7280' }}>Updated {new Date(dashboard.generated_at).toLocaleString()}</p>
-        </div>
-        <button onClick={() => load(true)} style={{ padding: '10px 14px' }}>Refresh</button>
-      </div>
+    <AppShell persona="admin">
+      <PageHeader eyebrow="Kajola operations" title="Operator dashboard" description={`Updated ${new Date(dashboard.generated_at).toLocaleString()}`} action={<Button variant="outline" onClick={() => load(true)}>Refresh</Button>} />
 
       {dashboard.alerts.length ? (
         <Section title="Alerts">
           <div style={{ display: 'grid', gap: 10 }}>
             {dashboard.alerts.map((alert) => (
-              <div key={alert.message} style={{ padding: 12, borderRadius: 8, background: alert.severity === 'critical' ? '#fee2e2' : '#fef3c7' }}>
-                <strong>{alert.severity}</strong>: {alert.message}
-              </div>
+              <Alert key={alert.message} tone={alert.severity === 'critical' ? 'error' : 'info'}><strong>{alert.severity}</strong>: {alert.message}</Alert>
             ))}
           </div>
         </Section>
@@ -142,22 +126,22 @@ export default function AdminDashboardPage() {
           pending_migrations: dashboard.migration_health.pending_migrations,
           failed_migrations: dashboard.migration_health.failed_migrations
         }} />
-        <div style={{ marginTop: 12, padding: 16, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8 }}>
+        <SurfaceCard>
           <p>Drift status: <strong>{dashboard.migration_health.drift_status}</strong></p>
           <p>Last migration: {dashboard.migration_health.last_migration_timestamp ? new Date(dashboard.migration_health.last_migration_timestamp).toLocaleString() : 'Not recorded'}</p>
-        </div>
+        </SurfaceCard>
       </Section>
 
       <Section title="Conversion Funnel">
-        <div style={{ display: 'grid', gap: 10, background: '#fff', padding: 16, border: '1px solid #e5e7eb', borderRadius: 8 }}>
+        <SurfaceCard>
           {(['views', 'clicks', 'bookings'] as const).map((key) => (
             <div key={key}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>{key}</span><strong>{dashboard.conversion_funnel[key]}</strong></div>
-              <div style={{ height: 10, background: '#e5e7eb', borderRadius: 999 }}><div style={{ width: `${(dashboard.conversion_funnel[key] / maxFunnel) * 100}%`, height: 10, background: '#2563eb', borderRadius: 999 }} /></div>
+              <div className="kj-progress"><span style={{ width: `${(dashboard.conversion_funnel[key] / maxFunnel) * 100}%` }} /></div>
             </div>
           ))}
           <p>Conversion rate: {dashboard.conversion_funnel.conversion_rate}%</p>
-        </div>
+        </SurfaceCard>
       </Section>
 
       <Section title="Liquidity Monitor">
@@ -178,19 +162,17 @@ export default function AdminDashboardPage() {
 
       <Section title="Failed Events">
         {failedEvents.length === 0 ? <p>No failed events.</p> : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff' }}>
+          <table className="kj-table">
             <tbody>
               {failedEvents.map((event) => (
                 <tr key={event.id}>
-                  <td style={{ padding: 10, borderBottom: '1px solid #e5e7eb' }}>{event.event_type}</td>
-                  <td style={{ padding: 10, borderBottom: '1px solid #e5e7eb' }}>{event.error_message ?? 'Failed'}</td>
-                  <td style={{ padding: 10, borderBottom: '1px solid #e5e7eb', textAlign: 'right' }}><button onClick={() => retryEvent(event.id)}>Retry</button></td>
+                  <td>{event.event_type}</td><td>{event.error_message ?? 'Failed'}</td><td style={{ textAlign: 'right' }}><Button variant="outline" onClick={() => retryEvent(event.id)}>Retry</Button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </Section>
-    </main>
+    </AppShell>
   );
 }

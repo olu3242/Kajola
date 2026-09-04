@@ -1,4 +1,5 @@
 // In-memory singleton store for LOCAL mode (no Supabase required)
+import type { CommercePolicy, PaymentMethod, PaymentPurpose, PaymentStatus, SettlementStatus } from './commerce';
 
 export type BookingStatus =
   | 'pending'
@@ -29,6 +30,11 @@ export interface StoreBooking {
   idempotency_key: string;
   created_at: string;
   payment_ref: string | null;
+  payment_status: PaymentStatus;
+  settlement_status: SettlementStatus;
+  amount_paid_kobo: number;
+  balance_due_kobo: number;
+  commerce_policy_version: string;
 }
 
 export interface StoreService {
@@ -39,6 +45,9 @@ export interface StoreService {
   duration_minutes: number;
   price_kobo: number;
   is_active: boolean;
+  category_id?: string;
+  service_type?: string;
+  aliases?: string[];
 }
 
 export interface StoreProvider {
@@ -48,11 +57,21 @@ export interface StoreProvider {
   business_name: string;
   category: string;
   city: string;
+  state: string;
   phone: string;
   avg_rating: number;
   total_reviews: number;
   completed_jobs: number;
   is_verified: boolean;
+  image_url: string;
+  about?: string;
+  address?: string;
+  specialties?: string[];
+  gallery_urls?: string[];
+  business_category?: string;
+  business_type?: string;
+  custom_business_type?: string;
+  payment_policy?: CommercePolicy;
 }
 
 export interface StoreAvailWindow {
@@ -86,7 +105,7 @@ export interface StoreUser {
   id: string;
   phone: string;
   full_name: string;
-  role: 'client' | 'artisan' | 'owner';
+  role: 'client' | 'artisan' | 'owner' | 'admin';
   tenant_id: string | null;
 }
 
@@ -97,6 +116,24 @@ export interface StorePayment {
   amount_kobo: number;
   status: 'pending' | 'success' | 'failed';
   created_at: string;
+  method: PaymentMethod;
+  purpose: PaymentPurpose;
+  subtotal_kobo: number;
+  gateway_fee_kobo: number;
+  platform_fee_kobo: number;
+  provider_net_kobo: number;
+  policy_version: string;
+}
+
+export interface StoreLedgerEntry {
+  id: string;
+  booking_id: string;
+  payment_id: string;
+  account: 'customer' | 'provider' | 'platform' | 'gateway';
+  direction: 'debit' | 'credit';
+  amount_kobo: number;
+  event: 'payment_succeeded' | 'tip_succeeded' | 'refund';
+  created_at: string;
 }
 
 export interface StoreNotification {
@@ -105,6 +142,42 @@ export interface StoreNotification {
   type: string;
   payload: object;
   sent_at: string | null;
+}
+
+export interface StoreDomainEvent {
+  event_id: string;
+  event_type: string;
+  version: 1;
+  tenant_id: string | null;
+  branch_id: string | null;
+  actor_id: string;
+  aggregate_type: string;
+  aggregate_id: string;
+  correlation_id: string;
+  causation_id: string | null;
+  occurred_at: string;
+  payload: Record<string, unknown>;
+}
+
+export interface StoreAuditRecord {
+  id: string;
+  actor_id: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  tenant_id: string | null;
+  old_state: Record<string, unknown> | null;
+  new_state: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface StoreWorkflowJob {
+  id: string;
+  event_id: string;
+  type: string;
+  run_at: string;
+  status: 'scheduled' | 'completed' | 'failed';
+  attempts: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,11 +192,17 @@ const providers: StoreProvider[] = [
     business_name: "Ada's Glow Studio",
     category: 'Beauty',
     city: 'lekki',
+    state: 'Lagos',
     phone: '+2348011111001',
     avg_rating: 4.8,
     total_reviews: 124,
     completed_jobs: 310,
     is_verified: true,
+    image_url: '/landing/hair-braider.jpg',
+    about: 'Protective styling, healthy-hair care, and polished beauty services in Lekki.',
+    address: 'Admiralty Way, Lekki Phase 1',
+    specialties: ['Box Braids', 'Knotless Braids', 'Natural Hair'],
+    gallery_urls: ['/landing/hair-braider.jpg', '/landing/salon-owner.jpg'],
   },
   {
     id: 'kofi-1',
@@ -132,11 +211,17 @@ const providers: StoreProvider[] = [
     business_name: 'Kofi Cuts Barbershop',
     category: 'Barbershop',
     city: 'victoria-island',
+    state: 'Lagos',
     phone: '+2348011111002',
     avg_rating: 4.7,
     total_reviews: 98,
     completed_jobs: 245,
     is_verified: true,
+    image_url: '/landing/barber-bookings.png',
+    about: 'Precision cuts, beard care, and dependable grooming appointments.',
+    address: 'Akin Adesola Street, Victoria Island',
+    specialties: ['Male Haircut', 'Haircut & Beard', 'Beard Trim'],
+    gallery_urls: ['/landing/barber-bookings.png'],
   },
   {
     id: 'ngozi-1',
@@ -145,11 +230,17 @@ const providers: StoreProvider[] = [
     business_name: 'Ngozi Nail Palace',
     category: 'Nails',
     city: 'surulere',
+    state: 'Lagos',
     phone: '+2348011111003',
     avg_rating: 4.9,
     total_reviews: 201,
     completed_jobs: 480,
     is_verified: true,
+    image_url: '/landing/salon-owner.jpg',
+    about: 'Detailed nail care with transparent pricing and bookable appointment times.',
+    address: 'Bode Thomas Street, Surulere',
+    specialties: ['Pedicure', 'Gel Nails', 'Manicure'],
+    gallery_urls: ['/landing/salon-owner.jpg'],
   },
   {
     id: 'tunde-1',
@@ -158,11 +249,17 @@ const providers: StoreProvider[] = [
     business_name: "Tunde's Fade Room",
     category: 'Barbershop',
     city: 'ikeja',
+    state: 'Lagos',
     phone: '+2348011111004',
     avg_rating: 4.6,
     total_reviews: 77,
     completed_jobs: 189,
     is_verified: true,
+    image_url: '/landing/barber-bookings.png',
+    about: 'Contemporary barbering and loc maintenance in central Ikeja.',
+    address: 'Allen Avenue, Ikeja',
+    specialties: ['Fade', 'Haircut & Beard', 'Loc Retwist'],
+    gallery_urls: ['/landing/barber-bookings.png'],
   },
   {
     id: 'amaka-1',
@@ -171,11 +268,55 @@ const providers: StoreProvider[] = [
     business_name: 'Amaka Brow & Lash',
     category: 'Beauty',
     city: 'yaba',
+    state: 'Lagos',
     phone: '+2348011111005',
     avg_rating: 4.9,
     total_reviews: 156,
     completed_jobs: 390,
     is_verified: true,
+    image_url: '/landing/hair-braider.jpg',
+    about: 'Brows, lashes, and occasion makeup from an experienced beauty professional.',
+    address: 'Herbert Macaulay Way, Yaba',
+    specialties: ['Eyelash Extensions', 'Eyebrow Tinting', 'Makeup'],
+    gallery_urls: ['/landing/hair-braider.jpg', '/landing/salon-owner.jpg'],
+  },
+  {
+    id: 'chinedu-1',
+    tenant_id: 'chinedu-1-tenant',
+    full_name: 'Chinedu Okafor',
+    business_name: 'FixRight Home Services',
+    category: 'Home services',
+    city: 'abuja',
+    state: 'Federal Capital Territory',
+    phone: '+2348011111006',
+    avg_rating: 4.7,
+    total_reviews: 64,
+    completed_jobs: 143,
+    is_verified: true,
+    image_url: '/landing/neighborhood-services.jpg',
+    about: 'Verified plumbing, electrical, and household repair help across Abuja.',
+    address: 'Gimbiya Street, Garki, Abuja',
+    specialties: ['Plumbing', 'Electrical Repair', 'Handyman'],
+    gallery_urls: ['/landing/neighborhood-services.jpg'],
+  },
+  {
+    id: 'zainab-1',
+    tenant_id: 'zainab-1-tenant',
+    full_name: 'Zainab Musa',
+    business_name: 'Zainab Wellness Studio',
+    category: 'Massage',
+    city: 'wuse',
+    state: 'Federal Capital Territory',
+    phone: '+2348011111007',
+    avg_rating: 4.9,
+    total_reviews: 88,
+    completed_jobs: 176,
+    is_verified: true,
+    image_url: '/landing/salon-owner.jpg',
+    about: 'Restorative massage and wellness appointments in Wuse.',
+    address: 'Aminu Kano Crescent, Wuse 2',
+    specialties: ['Deep Tissue Massage', 'Swedish Massage', 'Wellness'],
+    gallery_urls: ['/landing/salon-owner.jpg'],
   },
 ];
 
@@ -184,6 +325,7 @@ const services: StoreService[] = [
   { id: 'ada-svc-1', provider_id: 'ada-1', tenant_id: 'ada-1-tenant', name: 'Haircut & Style', duration_minutes: 60, price_kobo: 350000, is_active: true },
   { id: 'ada-svc-2', provider_id: 'ada-1', tenant_id: 'ada-1-tenant', name: 'Lash Extensions', duration_minutes: 90, price_kobo: 450000, is_active: true },
   { id: 'ada-svc-3', provider_id: 'ada-1', tenant_id: 'ada-1-tenant', name: 'Facial Treatment', duration_minutes: 60, price_kobo: 400000, is_active: true },
+  { id: 'ada-svc-4', provider_id: 'ada-1', tenant_id: 'ada-1-tenant', name: 'Waist-Length Medium Knotless', duration_minutes: 240, price_kobo: 2800000, is_active: true, category_id: 'braids-locs', service_type: 'Knotless Braids', aliases: ['box braids', 'hair braids'] },
 
   // Kofi Cuts — Barbershop (victoria-island)
   { id: 'kofi-svc-1', provider_id: 'kofi-1', tenant_id: 'kofi-1-tenant', name: 'Haircut', duration_minutes: 30, price_kobo: 250000, is_active: true },
@@ -199,11 +341,17 @@ const services: StoreService[] = [
   { id: 'tunde-svc-1', provider_id: 'tunde-1', tenant_id: 'tunde-1-tenant', name: 'Fade', duration_minutes: 45, price_kobo: 400000, is_active: true },
   { id: 'tunde-svc-2', provider_id: 'tunde-1', tenant_id: 'tunde-1-tenant', name: 'Taper Cut', duration_minutes: 45, price_kobo: 350000, is_active: true },
   { id: 'tunde-svc-3', provider_id: 'tunde-1', tenant_id: 'tunde-1-tenant', name: 'Dreadlock Retwist', duration_minutes: 120, price_kobo: 600000, is_active: true },
+  { id: 'tunde-svc-4', provider_id: 'tunde-1', tenant_id: 'tunde-1-tenant', name: 'Classic Haircut & Beard', duration_minutes: 60, price_kobo: 550000, is_active: true, category_id: 'barber', service_type: 'Haircut & Beard', aliases: ['male haircut', 'beard trim'] },
 
   // Amaka Brow & Lash — Beauty (yaba)
   { id: 'amaka-svc-1', provider_id: 'amaka-1', tenant_id: 'amaka-1-tenant', name: 'Brow Threading', duration_minutes: 20, price_kobo: 120000, is_active: true },
   { id: 'amaka-svc-2', provider_id: 'amaka-1', tenant_id: 'amaka-1-tenant', name: 'Lash Lift', duration_minutes: 60, price_kobo: 350000, is_active: true },
   { id: 'amaka-svc-3', provider_id: 'amaka-1', tenant_id: 'amaka-1-tenant', name: 'Full Glam Makeup', duration_minutes: 90, price_kobo: 800000, is_active: true },
+
+  { id: 'chinedu-svc-1', provider_id: 'chinedu-1', tenant_id: 'chinedu-1-tenant', name: 'Emergency Plumbing Repair', duration_minutes: 90, price_kobo: 1500000, is_active: true, category_id: 'home-services', service_type: 'Plumbing', aliases: ['plumber', 'leak repair'] },
+  { id: 'chinedu-svc-2', provider_id: 'chinedu-1', tenant_id: 'chinedu-1-tenant', name: 'Electrical Fault Diagnosis', duration_minutes: 60, price_kobo: 1200000, is_active: true, category_id: 'repairs', service_type: 'Electrical Repair', aliases: ['electrician', 'home repair'] },
+  { id: 'zainab-svc-1', provider_id: 'zainab-1', tenant_id: 'zainab-1-tenant', name: 'Deep Tissue Massage', duration_minutes: 60, price_kobo: 1800000, is_active: true, category_id: 'massage', service_type: 'Massage', aliases: ['body massage', 'therapy'] },
+  { id: 'zainab-svc-2', provider_id: 'zainab-1', tenant_id: 'zainab-1-tenant', name: 'Swedish Massage', duration_minutes: 60, price_kobo: 1600000, is_active: true, category_id: 'massage', service_type: 'Massage', aliases: ['relaxation massage', 'spa'] },
 ];
 
 // Mon–Sat (1–6) 09:00–17:00 for all providers
@@ -219,12 +367,15 @@ const users: StoreUser[] = [
   { id: 'client-1', phone: '+2348012345678', full_name: 'Chidi Nwosu', role: 'client', tenant_id: null },
   // Test owner (owns Ada's tenant)
   { id: 'owner-1', phone: '+2348098765432', full_name: 'Owner Ada', role: 'owner', tenant_id: 'ada-1-tenant' },
+  { id: 'admin-1', phone: '+2348000000001', full_name: 'Kajola Operator', role: 'admin', tenant_id: null },
   // Artisan profiles for each provider
   { id: 'ada-1', phone: '+2348011111001', full_name: 'Ada Okonkwo', role: 'artisan', tenant_id: 'ada-1-tenant' },
   { id: 'kofi-1', phone: '+2348011111002', full_name: 'Kofi Mensah', role: 'artisan', tenant_id: 'kofi-1-tenant' },
   { id: 'ngozi-1', phone: '+2348011111003', full_name: 'Ngozi Eze', role: 'artisan', tenant_id: 'ngozi-1-tenant' },
   { id: 'tunde-1', phone: '+2348011111004', full_name: 'Tunde Adeyemi', role: 'artisan', tenant_id: 'tunde-1-tenant' },
   { id: 'amaka-1', phone: '+2348011111005', full_name: 'Amaka Obi', role: 'artisan', tenant_id: 'amaka-1-tenant' },
+  { id: 'chinedu-1', phone: '+2348011111006', full_name: 'Chinedu Okafor', role: 'artisan', tenant_id: 'chinedu-1-tenant' },
+  { id: 'zainab-1', phone: '+2348011111007', full_name: 'Zainab Musa', role: 'artisan', tenant_id: 'zainab-1-tenant' },
 ];
 
 // Mutable arrays for runtime data
@@ -233,8 +384,12 @@ const payments: StorePayment[] = [];
 const reviews: StoreReview[] = [];
 const gratuities: StoreGratuity[] = [];
 const notifications: StoreNotification[] = [];
+const ledger: StoreLedgerEntry[] = [];
+const events: StoreDomainEvent[] = [];
+const audits: StoreAuditRecord[] = [];
+const workflows: StoreWorkflowJob[] = [];
 
-export const store = {
+const initialStore = {
   providers,
   services,
   availWindows,
@@ -244,7 +399,21 @@ export const store = {
   gratuities,
   users,
   notifications,
+  ledger,
+  events,
+  audits,
+  workflows,
 };
+
+const globalForKajola = globalThis as typeof globalThis & {
+  __kajolaLocalStore?: typeof initialStore;
+};
+
+// Next.js compiles route handlers independently in development. Keeping the
+// local adapter on the process global prevents one route from seeing a fresh
+// seed after another route has created or updated a booking.
+export const store = globalForKajola.__kajolaLocalStore ?? initialStore;
+globalForKajola.__kajolaLocalStore = store;
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -8,7 +8,10 @@ export async function POST(req: NextRequest) {
   if (isLocalMode) {
     const user = getSessionUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return NextResponse.json({ error: 'A JSON request body is required' }, { status: 400 });
+    }
     const reference: string = body.reference ?? '';
     const bookingId: string = body.bookingId ?? body.booking_id ?? '';
     if (!reference || !bookingId) {

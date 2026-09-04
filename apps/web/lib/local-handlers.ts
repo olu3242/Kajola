@@ -11,6 +11,10 @@ import {
   StoreUser,
   BookingStatus,
 } from './store';
+import { DEFAULT_COMMERCE_POLICY, depositFor, quoteCheckout, type PaymentMethod, type PaymentPurpose } from './commerce';
+import { findCategory, searchableText } from './service-taxonomy';
+import { locationSlug } from './nigeria-locations';
+import { createNotification, recordDomainChange, scheduleWorkflow } from './domain-runtime';
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -34,24 +38,62 @@ export async function handleLogin(body: {
 // Providers
 // ---------------------------------------------------------------------------
 
-export function listProviders(params: {
+export function searchProviders(params: {
   city?: string;
   category?: string;
+  q?: string;
+  minRating?: number;
+  maxPriceKobo?: number;
   limit?: number;
-}): StoreProvider[] {
+}): { providers: StoreProvider[]; related: boolean } {
   let result = [...store.providers];
   if (params.city) {
     const city = params.city.toLowerCase();
-    result = result.filter((p) => p.city.toLowerCase() === city);
+    result = result.filter((p) => p.city.toLowerCase() === city || locationSlug(p.state) === city);
   }
   if (params.category) {
-    const cat = params.category.toLowerCase();
-    result = result.filter((p) => p.category.toLowerCase() === cat);
+    const selected = findCategory(params.category);
+    const terms = selected ? [selected.id, selected.label, ...selected.aliases] : [params.category];
+    result = result.filter((provider) => {
+      const services = store.services.filter((item) => item.provider_id === provider.id && item.is_active);
+      if (selected && services.some((item) => item.category_id === selected.id)) return true;
+      const text = searchableText([provider.category, provider.business_name, provider.about, ...(provider.specialties ?? []), ...services.flatMap((item) => [item.name, item.service_type, ...(item.aliases ?? [])])]);
+      return terms.some((term) => text.includes(term.toLowerCase()));
+    });
+  }
+  if (params.q?.trim()) {
+    const tokens = params.q.toLowerCase().split(/\s+/).filter(Boolean);
+    result = result.filter((provider) => {
+      const services = store.services.filter((item) => item.provider_id === provider.id && item.is_active);
+      const text = searchableText([provider.full_name, provider.business_name, provider.category, provider.about, provider.city, provider.state, ...(provider.specialties ?? []), ...services.flatMap((item) => [item.name, item.service_type, ...(item.aliases ?? [])])]);
+      return tokens.every((token) => text.includes(token));
+    });
+  }
+  if (params.minRating) {
+    result = result.filter((provider) => provider.avg_rating >= params.minRating!);
+  }
+  if (params.maxPriceKobo) {
+    result = result.filter((provider) => store.services.some((service) => service.provider_id === provider.id && service.is_active && service.price_kobo <= params.maxPriceKobo!));
+  }
+
+  let related = false;
+  if (result.length === 0 && (params.q || params.category)) {
+    related = true;
+    const fallbackTerms = `${params.q ?? ''} ${params.category ?? ''}`.toLowerCase().split(/\s+/).filter((term) => term.length > 2);
+    const fallbackProviders = params.city ? store.providers.filter((provider) => provider.city.toLowerCase() === params.city!.toLowerCase() || locationSlug(provider.state) === params.city!.toLowerCase()) : [...store.providers];
+    result = fallbackProviders.sort((a, b) => {
+      const score = (provider: StoreProvider) => {
+        const services = store.services.filter((item) => item.provider_id === provider.id);
+        const text = searchableText([provider.business_name, provider.category, provider.about, ...(provider.specialties ?? []), ...services.map((item) => item.name)]);
+        return fallbackTerms.filter((term) => text.includes(term)).length;
+      };
+      return score(b) - score(a);
+    }).slice(0, 4);
   }
   if (params.limit && params.limit > 0) {
     result = result.slice(0, params.limit);
   }
-  return result;
+  return { providers: result, related };
 }
 
 export function getProvider(id: string): StoreProvider | null {
@@ -60,6 +102,36 @@ export function getProvider(id: string): StoreProvider | null {
 
 export function getProviderServices(providerId: string): StoreService[] {
   return store.services.filter((s) => s.provider_id === providerId && s.is_active);
+}
+
+export function saveProviderOnboarding(user: StoreUser, body: Record<string, unknown>): { provider?: StoreProvider; error?: string } {
+  if (user.role !== 'artisan') return { error: 'Forbidden: artisan role required' };
+  const provider = store.providers.find((item) => item.id === user.id);
+  if (!provider) return { error: 'Provider profile not found' };
+  const businessType = String(body.business_type ?? '').trim();
+  const customBusinessType = String(body.custom_business_type ?? '').trim();
+  if (!businessType) return { error: 'Business type is required' };
+  if (businessType === 'other' && !customBusinessType) return { error: 'Tell us what your business does' };
+  provider.business_name = String(body.business_name ?? provider.business_name).trim() || provider.business_name;
+  provider.category = String(body.business_category ?? body.category ?? provider.category).trim() || provider.category;
+  provider.business_category = String(body.business_category ?? body.category ?? provider.category);
+  provider.business_type = businessType;
+  provider.custom_business_type = customBusinessType;
+  provider.about = String(body.description ?? provider.about ?? '');
+  provider.city = String(body.city ?? provider.city);
+  provider.image_url = String(body.profile_photo_url ?? provider.image_url) || provider.image_url;
+  return { provider };
+}
+
+export function addProviderServices(user: StoreUser, input: Array<Record<string, unknown>>): { services?: StoreService[]; error?: string } {
+  if (user.role !== 'artisan' || !user.tenant_id) return { error: 'Forbidden: artisan role required' };
+  const created = input.filter((item) => String(item.name ?? '').trim()).map((item) => ({
+    id: randomUUID(), provider_id: user.id, tenant_id: user.tenant_id!, name: String(item.name).trim(),
+    duration_minutes: Math.max(15, Number(item.duration_minutes) || 60), price_kobo: Math.max(0, Number(item.price_kobo ?? item.price_cents) || 0),
+    is_active: true, category_id: item.category_id ? String(item.category_id) : undefined, service_type: item.service_type ? String(item.service_type) : undefined,
+  }));
+  store.services.push(...created);
+  return { services: created };
 }
 
 // ---------------------------------------------------------------------------
@@ -142,20 +214,29 @@ export async function holdSlot(
     ends_at: body.ends_at,
     held_until: heldUntil.toISOString(),
     total_amount_kobo: service.price_kobo,
-    deposit_amount_kobo: Math.round(service.price_kobo * 0.3),
+    deposit_amount_kobo: depositFor(service.price_kobo, provider.payment_policy ?? DEFAULT_COMMERCE_POLICY),
     deposit_paid_at: null,
     idempotency_key: randomUUID(),
     created_at: now.toISOString(),
     payment_ref: null,
+    payment_status: 'unpaid',
+    settlement_status: 'not_due',
+    amount_paid_kobo: 0,
+    balance_due_kobo: service.price_kobo,
+    commerce_policy_version: (provider.payment_policy ?? DEFAULT_COMMERCE_POLICY).version,
   };
 
   store.bookings.push(booking);
+  const holdEvent = recordDomainChange({ eventType: 'booking.hold_created', actor: user, tenantId: provider.tenant_id, aggregateType: 'booking', aggregateId: booking.id, newState: { status: booking.status, held_until: booking.held_until }, payload: { provider_id: booking.provider_id, service_id: booking.service_id, starts_at: booking.starts_at } });
+  scheduleWorkflow(holdEvent.event_id, 'expire_booking_hold', heldUntil);
   return { booking };
 }
 
 export async function initPayment(
   user: StoreUser,
   bookingId: string,
+  method: PaymentMethod = 'bank_transfer',
+  purpose?: Exclude<PaymentPurpose, 'tip'>,
 ): Promise<{ reference: string; authorization_url: string; error?: string }> {
   const booking = store.bookings.find((b) => b.id === bookingId);
   if (!booking) {
@@ -165,25 +246,63 @@ export async function initPayment(
     return { reference: '', authorization_url: '', error: 'Forbidden' };
   }
 
-  const reference = `PAY-${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
+  const provider = store.providers.find((item) => item.id === booking.provider_id);
+  const policy = provider?.payment_policy ?? DEFAULT_COMMERCE_POLICY;
+  if (!policy.allowed_methods.includes(method) || (method === 'pay_at_venue' && !policy.pay_at_venue_enabled)) {
+    return { reference: '', authorization_url: '', error: 'Payment method is not available for this business' };
+  }
+  const quote = quoteCheckout({
+    totalKobo: booking.total_amount_kobo,
+    paidKobo: booking.amount_paid_kobo,
+    policy,
+    purpose,
+    // Provider fee data is injected server-side when configured. Zero is the
+    // safe local-mode value and is never trusted from the browser.
+    gatewayFeeKobo: Number(process.env.KAJOLA_GATEWAY_FEE_KOBO ?? 0),
+  });
+  if (quote.subtotal_due_kobo <= 0) {
+    return { reference: '', authorization_url: '', error: 'No payment is due for this booking' };
+  }
+
+  const existing = store.payments.find((item) => item.booking_id === bookingId && item.method === method && item.purpose === quote.purpose && item.status !== 'failed');
+  if (existing) return { reference: existing.reference, authorization_url: method === 'pay_at_venue' ? `/dashboard/bookings/${bookingId}?payment=at-venue` : `/payment/callback?reference=${existing.reference}&bookingId=${bookingId}` };
+
+  const reference = `${method === 'pay_at_venue' ? 'VENUE' : 'PAY'}-${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
 
   const payment = {
     id: randomUUID(),
     booking_id: bookingId,
     reference,
-    amount_kobo: booking.deposit_amount_kobo,
+    amount_kobo: quote.customer_total_kobo,
     status: 'pending' as const,
     created_at: new Date().toISOString(),
+    method,
+    purpose: quote.purpose,
+    subtotal_kobo: quote.subtotal_due_kobo,
+    gateway_fee_kobo: quote.gateway_fee_kobo,
+    platform_fee_kobo: quote.platform_fee_kobo,
+    provider_net_kobo: quote.provider_net_kobo,
+    policy_version: quote.policy_version,
   };
   store.payments.push(payment);
 
   // Update booking status
-  booking.status = 'awaiting_payment';
+  const isInitialConfirmation = ['held', 'awaiting_payment'].includes(booking.status);
+  if (isInitialConfirmation) booking.status = 'awaiting_payment';
+  booking.payment_status = 'pending';
   booking.payment_ref = reference;
+
+  if (method === 'pay_at_venue') {
+    booking.status = 'confirmed';
+    booking.payment_status = booking.amount_paid_kobo > 0 ? 'partially_paid' : 'unpaid';
+  }
+  recordDomainChange({ eventType: 'payment.intent_created', actor: user, tenantId: booking.tenant_id, aggregateType: 'payment', aggregateId: payment.id, newState: { status: payment.status }, payload: { booking_id: booking.id, reference, method, purpose: payment.purpose, amount_kobo: payment.amount_kobo } });
 
   return {
     reference,
-    authorization_url: `/payment/callback?reference=${reference}&bookingId=${bookingId}`,
+    authorization_url: method === 'pay_at_venue'
+      ? `/dashboard/bookings/${bookingId}?payment=at-venue`
+      : `/payment/callback?reference=${reference}&bookingId=${bookingId}`,
   };
 }
 
@@ -206,9 +325,33 @@ export async function verifyPayment(
     return { success: false, error: 'Forbidden' };
   }
 
+  if (payment.booking_id !== booking.id) return { success: false, error: 'Payment does not match booking' };
+  if (payment.status === 'success') return { success: true, booking };
+
   payment.status = 'success';
-  booking.deposit_paid_at = new Date().toISOString();
-  booking.status = 'confirmed';
+  booking.amount_paid_kobo = Math.min(booking.total_amount_kobo, booking.amount_paid_kobo + payment.subtotal_kobo);
+  booking.balance_due_kobo = Math.max(0, booking.total_amount_kobo - booking.amount_paid_kobo);
+  booking.payment_status = booking.balance_due_kobo === 0 ? 'paid' : 'partially_paid';
+  booking.settlement_status = 'pending';
+  if (payment.purpose === 'deposit') booking.deposit_paid_at = new Date().toISOString();
+  const confirmsBooking = ['held', 'awaiting_payment'].includes(booking.status);
+  if (confirmsBooking) booking.status = 'confirmed';
+
+  const createdAt = new Date().toISOString();
+  store.ledger.push(
+    { id: randomUUID(), booking_id: booking.id, payment_id: payment.id, account: 'customer', direction: 'debit', amount_kobo: payment.amount_kobo, event: 'payment_succeeded', created_at: createdAt },
+    { id: randomUUID(), booking_id: booking.id, payment_id: payment.id, account: 'provider', direction: 'credit', amount_kobo: payment.provider_net_kobo, event: 'payment_succeeded', created_at: createdAt },
+  );
+  if (payment.platform_fee_kobo > 0) store.ledger.push({ id: randomUUID(), booking_id: booking.id, payment_id: payment.id, account: 'platform', direction: 'credit', amount_kobo: payment.platform_fee_kobo, event: 'payment_succeeded', created_at: createdAt });
+  if (payment.gateway_fee_kobo > 0) store.ledger.push({ id: randomUUID(), booking_id: booking.id, payment_id: payment.id, account: 'gateway', direction: 'credit', amount_kobo: payment.gateway_fee_kobo, event: 'payment_succeeded', created_at: createdAt });
+  const paymentEvent = recordDomainChange({ eventType: 'payment.succeeded', actor: user, tenantId: booking.tenant_id, aggregateType: 'payment', aggregateId: payment.id, oldState: { status: 'pending' }, newState: { status: payment.status }, payload: { booking_id: booking.id, amount_kobo: payment.amount_kobo, purpose: payment.purpose } });
+  if (confirmsBooking) {
+    recordDomainChange({ eventType: 'booking.confirmed', actor: user, tenantId: booking.tenant_id, aggregateType: 'booking', aggregateId: booking.id, newState: { status: booking.status, payment_status: booking.payment_status }, correlationId: paymentEvent.correlation_id });
+    createNotification(booking.client_id, 'booking.confirmed', { booking_id: booking.id });
+    createNotification(booking.provider_id, 'booking.confirmed', { booking_id: booking.id });
+    scheduleWorkflow(paymentEvent.event_id, 'appointment_reminder_24h', new Date(new Date(booking.starts_at).getTime() - 24 * 60 * 60 * 1000));
+    scheduleWorkflow(paymentEvent.event_id, 'appointment_reminder_2h', new Date(new Date(booking.starts_at).getTime() - 2 * 60 * 60 * 1000));
+  }
 
   return { success: true, booking };
 }
@@ -284,6 +427,14 @@ export async function updateBookingStatus(
   }
 
   booking.status = newStatus as BookingStatus;
+  const eventName: Record<string, string> = { cancelled: 'booking.cancelled', checked_in: 'booking.checked_in', in_progress: 'service.started', completed: 'service.completed', no_show: 'booking.no_show' };
+  const event = recordDomainChange({ eventType: eventName[newStatus] ?? 'booking.updated', actor: user, tenantId: booking.tenant_id, aggregateType: 'booking', aggregateId: booking.id, oldState: { status: current }, newState: { status: booking.status } });
+  if (newStatus === 'completed') {
+    booking.settlement_status = booking.payment_status === 'paid' ? 'available' : 'not_due';
+    createNotification(booking.client_id, 'service.completed', { booking_id: booking.id, balance_due_kobo: booking.balance_due_kobo });
+    scheduleWorkflow(event.event_id, 'request_review_and_rebooking', new Date());
+  }
+
   return { booking };
 }
 
@@ -315,6 +466,7 @@ export async function submitReview(
     created_at: new Date().toISOString(),
   };
   store.reviews.push(review);
+  recordDomainChange({ eventType: 'review.submitted', actor: user, tenantId: booking.tenant_id, aggregateType: 'review', aggregateId: review.id, newState: { rating: review.rating }, payload: { booking_id: booking.id } });
 
   // Update provider aggregate
   const provider = store.providers.find((p) => p.id === booking.provider_id);
@@ -337,6 +489,8 @@ export async function submitGratuity(
   if (booking.client_id !== user.id) return { error: 'Forbidden: not your booking' };
   if (booking.status !== 'completed') return { error: 'Can only tip for completed bookings' };
   if (body.amount_kobo <= 0) return { error: 'Tip amount must be positive' };
+  const existing = store.gratuities.find((item) => item.booking_id === body.booking_id);
+  if (existing) return { gratuity: existing };
 
   const gratuity: StoreGratuity = {
     id: randomUUID(),
@@ -348,6 +502,12 @@ export async function submitGratuity(
     created_at: new Date().toISOString(),
   };
   store.gratuities.push(gratuity);
+  store.ledger.push(
+    { id: randomUUID(), booking_id: booking.id, payment_id: gratuity.id, account: 'customer', direction: 'debit', amount_kobo: gratuity.amount_kobo, event: 'tip_succeeded', created_at: gratuity.created_at },
+    { id: randomUUID(), booking_id: booking.id, payment_id: gratuity.id, account: 'provider', direction: 'credit', amount_kobo: gratuity.amount_kobo, event: 'tip_succeeded', created_at: gratuity.created_at },
+  );
+  recordDomainChange({ eventType: 'gratuity.received', actor: user, tenantId: booking.tenant_id, aggregateType: 'gratuity', aggregateId: gratuity.id, newState: { amount_kobo: gratuity.amount_kobo }, payload: { booking_id: booking.id, provider_id: booking.provider_id } });
+  createNotification(booking.provider_id, 'gratuity.received', { booking_id: booking.id, amount_kobo: gratuity.amount_kobo });
   return { gratuity };
 }
 
