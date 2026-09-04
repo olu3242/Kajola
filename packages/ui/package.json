@@ -5,7 +5,8 @@
   "types": "src/index.ts",
   "private": true,
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

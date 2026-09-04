@@ -16,7 +16,7 @@ export type SorfBookingEventType =
 
 /** SORF payment lifecycle events */
 export type SorfPaymentEventType =
-  | 'payment.confirmed'   // payment provider webhook: success
+  | 'payment.succeeded'   // payment provider webhook: success
   | 'payment.failed'      // payment provider webhook: failure
   | 'payment.refund_initiated'; // refund started (cancellation or no-show reversal)
 

@@ -35,6 +35,7 @@ export interface StoreBooking {
   amount_paid_kobo: number;
   balance_due_kobo: number;
   commerce_policy_version: string;
+  flow_instance_id?: string;
 }
 
 export interface StoreService {

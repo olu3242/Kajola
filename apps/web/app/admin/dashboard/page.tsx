@@ -61,23 +61,27 @@ function RankingTable({ rows }: { rows: Array<{ label: string; count: number }> 
 export default function AdminDashboardPage() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [failedEvents, setFailedEvents] = useState<any[]>([]);
+  const [flowRuntime, setFlowRuntime] = useState<{ flow_status?: Record<string, number>; recent_flows?: any[] }>({});
   const [error, setError] = useState('');
 
   async function load(refresh = false) {
     const token = window.localStorage.getItem('kajola_access_token');
     const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    const [dashboardRes, eventsRes] = await Promise.all([
+    const [dashboardRes, eventsRes, runtimeRes] = await Promise.all([
       fetch(`/api/admin/dashboard${refresh ? '?refresh=true' : ''}`, { headers }),
-      fetch('/api/admin/events?status=failed', { headers })
+      fetch('/api/admin/events?status=failed', { headers }),
+      fetch('/api/operator/runtime', { headers })
     ]);
     const dashboardData = await dashboardRes.json();
     const eventsData = await eventsRes.json();
+    const runtimeData = await runtimeRes.json();
     if (!dashboardRes.ok) {
       setError(dashboardData.error ?? 'Unable to load dashboard');
       return;
     }
     setDashboard(dashboardData.dashboard);
     setFailedEvents(eventsData.events ?? []);
+    if (runtimeRes.ok) setFlowRuntime(runtimeData);
     setError('');
   }
 
@@ -120,6 +124,17 @@ export default function AdminDashboardPage() {
       <Section title="Supply Health"><Cards data={dashboard.supply_health} /></Section>
       <Section title="Revenue"><Cards data={dashboard.revenue} moneyKeys={['revenue_today', 'revenue_last_7_days', 'avg_booking_value']} /></Section>
       <Section title="Automation Health"><Cards data={dashboard.automation_health} /></Section>
+      <Section title="Flow Orchestration">
+        <Cards data={flowRuntime.flow_status ?? { active_flows: 0 }} />
+        {(flowRuntime.recent_flows ?? []).length === 0 ? <p>No booking flows have started in this runtime.</p> : (
+          <table className="kj-table">
+            <thead><tr><th>Flow</th><th>Business object</th><th>Status</th><th>Correlation</th></tr></thead>
+            <tbody>{(flowRuntime.recent_flows ?? []).map((flow) => (
+              <tr key={flow.id}><td>{flow.flowKey}@{flow.flowVersion}</td><td>{flow.workflowType}:{flow.workflowId}</td><td>{flow.status}</td><td>{flow.correlationId}</td></tr>
+            ))}</tbody>
+          </table>
+        )}
+      </Section>
       <Section title="Migration Health">
         <Cards data={{
           applied_migrations: dashboard.migration_health.applied_migrations,

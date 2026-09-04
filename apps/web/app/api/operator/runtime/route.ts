@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/session';
 import { isLocalMode } from '@/lib/local-mode';
 import { store } from '@/lib/store';
+import { listBookingFlows } from '@/lib/booking-flow';
+import { createDurableBookingOrchestrator, durableRequest } from '@/lib/durable-flow-runtime';
+import { getRuntimeUser } from '@/lib/server-auth';
 
 export async function GET(req: NextRequest) {
-  const user = getSessionUser(req);
+  const user = await getRuntimeUser(req);
   if (!user) return NextResponse.json({ code: 'UNAUTHENTICATED', error: 'Authentication required' }, { status: 401 });
-  if (user.role !== 'admin') return NextResponse.json({ code: 'FORBIDDEN', error: 'Operator access required' }, { status: 403 });
+  if (!user.isPlatformOperator) return NextResponse.json({ code: 'FORBIDDEN', error: 'Operator access required' }, { status: 403 });
   const checks = {
     database: isLocalMode ? 'local-adapter' : process.env.NEXT_PUBLIC_SUPABASE_URL ? 'configured' : 'missing',
     auth: isLocalMode ? 'local-adapter' : process.env.SUPABASE_JWT_SECRET ? 'configured' : 'missing',
@@ -16,5 +18,33 @@ export async function GET(req: NextRequest) {
     workflow: isLocalMode ? 'local-scheduler' : 'database-worker',
     ai: process.env.ANTHROPIC_API_KEY ? 'configured' : 'optional',
   };
-  return NextResponse.json({ checks, evidence: { events: store.events.length, audits: store.audits.length, ledger_entries: store.ledger.length, scheduled_workflows: store.workflows.filter((job) => job.status === 'scheduled').length, notifications: store.notifications.length }, recent_events: store.events.slice(-20).reverse(), recent_audits: store.audits.slice(-20).reverse() });
+  let flows = isLocalMode ? await listBookingFlows() : [];
+  let durableEvidence: Record<string, unknown> = {};
+  if (!isLocalMode) {
+    try {
+      const durable = createDurableBookingOrchestrator();
+      await durable.ready;
+      flows = await durable.repository.findInstances({});
+      const [events, audits, ledger, timers, notifications, workers, deadLetters] = await Promise.all([
+        durableRequest<unknown[]>('/rest/v1/system_events?select=id&limit=1000'),
+        durableRequest<unknown[]>('/rest/v1/flow_audit_entries?select=id&limit=1000'),
+        durableRequest<unknown[]>('/rest/v1/financial_ledger_entries?select=id&limit=1000'),
+        durableRequest<unknown[]>('/rest/v1/flow_timers?status=eq.SCHEDULED&select=id&limit=1000'),
+        durableRequest<unknown[]>('/rest/v1/notifications?select=id,status&limit=1000'),
+        durableRequest<unknown[]>('/rest/v1/runtime_worker_heartbeats?select=worker_id,heartbeat_at&limit=20'),
+        durableRequest<unknown[]>('/rest/v1/workflow_dead_letters?status=eq.OPEN&select=id&limit=1000'),
+      ]);
+      durableEvidence = { events: events.length, audits: audits.length, ledger_entries: ledger.length, scheduled_workflows: timers.length, notifications: notifications.length, worker_heartbeats: workers, open_dead_letters: deadLetters.length, flow_repository: 'supabase' };
+    } catch (error) {
+      return NextResponse.json({ code: 'DEPENDENCY_UNAVAILABLE', error: error instanceof Error ? error.message : 'Durable runtime unavailable' }, { status: 503 });
+    }
+  }
+  const flowStatus = flows.reduce<Record<string, number>>((result, flow) => {
+    result[flow.status] = (result[flow.status] ?? 0) + 1;
+    return result;
+  }, {});
+  const evidence = isLocalMode
+    ? { events: store.events.length, audits: store.audits.length, ledger_entries: store.ledger.length, scheduled_workflows: store.workflows.filter((job) => job.status === 'scheduled').length, notifications: store.notifications.length, flow_instances: flows.length, flow_repository: 'local-adapter' }
+    : { ...durableEvidence, flow_instances: flows.length };
+  return NextResponse.json({ checks, evidence, flow_status: flowStatus, recent_flows: flows.slice(-20).reverse(), recent_events: isLocalMode ? store.events.slice(-20).reverse() : [], recent_audits: isLocalMode ? store.audits.slice(-20).reverse() : [] });
 }

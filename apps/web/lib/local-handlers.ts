@@ -14,7 +14,8 @@ import {
 import { DEFAULT_COMMERCE_POLICY, depositFor, quoteCheckout, type PaymentMethod, type PaymentPurpose } from './commerce';
 import { findCategory, searchableText } from './service-taxonomy';
 import { locationSlug } from './nigeria-locations';
-import { createNotification, recordDomainChange, scheduleWorkflow } from './domain-runtime';
+import { createNotification, recordDomainChange } from './domain-runtime';
+import { processBookingFlowEvent, startBookingFlow } from './booking-flow';
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -227,8 +228,9 @@ export async function holdSlot(
   };
 
   store.bookings.push(booking);
-  const holdEvent = recordDomainChange({ eventType: 'booking.hold_created', actor: user, tenantId: provider.tenant_id, aggregateType: 'booking', aggregateId: booking.id, newState: { status: booking.status, held_until: booking.held_until }, payload: { provider_id: booking.provider_id, service_id: booking.service_id, starts_at: booking.starts_at } });
-  scheduleWorkflow(holdEvent.event_id, 'expire_booking_hold', heldUntil);
+  const holdEvent = recordDomainChange({ eventType: 'booking.held', actor: user, tenantId: provider.tenant_id, aggregateType: 'booking', aggregateId: booking.id, newState: { status: booking.status, held_until: booking.held_until }, payload: { provider_id: booking.provider_id, service_id: booking.service_id, starts_at: booking.starts_at } });
+  const flow = await startBookingFlow(booking, holdEvent, user);
+  booking.flow_instance_id = flow.id;
   return { booking };
 }
 
@@ -297,6 +299,10 @@ export async function initPayment(
     booking.payment_status = booking.amount_paid_kobo > 0 ? 'partially_paid' : 'unpaid';
   }
   recordDomainChange({ eventType: 'payment.intent_created', actor: user, tenantId: booking.tenant_id, aggregateType: 'payment', aggregateId: payment.id, newState: { status: payment.status }, payload: { booking_id: booking.id, reference, method, purpose: payment.purpose, amount_kobo: payment.amount_kobo } });
+  if (method === 'pay_at_venue') {
+    const confirmationEvent = recordDomainChange({ eventType: 'booking.confirmed', actor: user, tenantId: booking.tenant_id, aggregateType: 'booking', aggregateId: booking.id, newState: { status: booking.status, payment_status: booking.payment_status }, payload: { booking_id: booking.id, method } });
+    await processBookingFlowEvent(booking, confirmationEvent, user);
+  }
 
   return {
     reference,
@@ -347,11 +353,8 @@ export async function verifyPayment(
   const paymentEvent = recordDomainChange({ eventType: 'payment.succeeded', actor: user, tenantId: booking.tenant_id, aggregateType: 'payment', aggregateId: payment.id, oldState: { status: 'pending' }, newState: { status: payment.status }, payload: { booking_id: booking.id, amount_kobo: payment.amount_kobo, purpose: payment.purpose } });
   if (confirmsBooking) {
     recordDomainChange({ eventType: 'booking.confirmed', actor: user, tenantId: booking.tenant_id, aggregateType: 'booking', aggregateId: booking.id, newState: { status: booking.status, payment_status: booking.payment_status }, correlationId: paymentEvent.correlation_id });
-    createNotification(booking.client_id, 'booking.confirmed', { booking_id: booking.id });
-    createNotification(booking.provider_id, 'booking.confirmed', { booking_id: booking.id });
-    scheduleWorkflow(paymentEvent.event_id, 'appointment_reminder_24h', new Date(new Date(booking.starts_at).getTime() - 24 * 60 * 60 * 1000));
-    scheduleWorkflow(paymentEvent.event_id, 'appointment_reminder_2h', new Date(new Date(booking.starts_at).getTime() - 2 * 60 * 60 * 1000));
   }
+  await processBookingFlowEvent(booking, paymentEvent, user);
 
   return { success: true, booking };
 }
@@ -427,13 +430,12 @@ export async function updateBookingStatus(
   }
 
   booking.status = newStatus as BookingStatus;
-  const eventName: Record<string, string> = { cancelled: 'booking.cancelled', checked_in: 'booking.checked_in', in_progress: 'service.started', completed: 'service.completed', no_show: 'booking.no_show' };
+  const eventName: Record<string, string> = { cancelled: 'booking.cancelled', checked_in: 'booking.checked_in', in_progress: 'booking.started', completed: 'booking.completed', no_show: 'booking.no_show' };
   const event = recordDomainChange({ eventType: eventName[newStatus] ?? 'booking.updated', actor: user, tenantId: booking.tenant_id, aggregateType: 'booking', aggregateId: booking.id, oldState: { status: current }, newState: { status: booking.status } });
   if (newStatus === 'completed') {
     booking.settlement_status = booking.payment_status === 'paid' ? 'available' : 'not_due';
-    createNotification(booking.client_id, 'service.completed', { booking_id: booking.id, balance_due_kobo: booking.balance_due_kobo });
-    scheduleWorkflow(event.event_id, 'request_review_and_rebooking', new Date());
   }
+  await processBookingFlowEvent(booking, event, user);
 
   return { booking };
 }

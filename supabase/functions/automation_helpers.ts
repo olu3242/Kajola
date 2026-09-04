@@ -6,6 +6,36 @@ export type AutomationAction = {
   config: Record<string, unknown>;
 };
 
+export type EventEnvelopeOptions = {
+  eventId?: string;
+  schemaVersion?: number;
+  workflowId?: string;
+  flowInstanceId?: string;
+  stepInstanceId?: string;
+  correlationId?: string;
+  causationId?: string;
+  actor?: Record<string, unknown>;
+  idempotencyKey?: string;
+};
+
+const canonicalEventAliases: Record<string, string> = {
+  booking_created: 'booking.created',
+  booking_confirmed: 'booking.confirmed',
+  booking_completed: 'booking.completed',
+  first_booking_completed: 'provider.first_booking_completed',
+  payment_successful: 'payment.succeeded',
+  review_created: 'review.submitted',
+  artisan_onboarded: 'provider.onboarded',
+  artisan_verified: 'provider.verified',
+  referral_completed: 'referral.completed',
+  subscription_started: 'subscription.started',
+  boost_activated: 'provider.boost_activated'
+};
+
+export function canonicalEventType(eventType: string) {
+  return canonicalEventAliases[eventType] ?? eventType;
+}
+
 export async function emitSystemEvent(
   supabase: SupabaseClient,
   tenant_id: string,
@@ -14,19 +44,29 @@ export async function emitSystemEvent(
   source = 'automation',
   createdBy = 'system',
   entityType?: string,
-  entityId?: string
+  entityId?: string,
+  envelope: EventEnvelopeOptions = {}
 ) {
-  const dedup_key = `${eventType}:${entityType ?? 'system'}:${entityId ?? crypto.randomUUID()}`;
+  const normalizedEventType = canonicalEventType(eventType);
+  const dedup_key = envelope.idempotencyKey ?? `${normalizedEventType}:${entityType ?? 'system'}:${entityId ?? envelope.eventId ?? crypto.randomUUID()}`;
   const row = {
+    ...(envelope.eventId ? { id: envelope.eventId } : {}),
     tenant_id,
-    event_type: eventType,
-    payload,
+    event_type: normalizedEventType,
+    payload: normalizedEventType === eventType ? payload : { ...payload, legacy_event_type: eventType },
     source,
     created_by: createdBy,
     entity_type: entityType ?? null,
     entity_id: entityId ?? null,
     status: 'pending',
-    dedup_key
+    dedup_key,
+    schema_version: envelope.schemaVersion ?? 1,
+    workflow_id: envelope.workflowId ?? null,
+    flow_instance_id: envelope.flowInstanceId ?? null,
+    step_instance_id: envelope.stepInstanceId ?? null,
+    correlation_id: envelope.correlationId ?? crypto.randomUUID(),
+    causation_id: envelope.causationId ?? null,
+    actor: envelope.actor ?? { type: 'SYSTEM', id: createdBy }
   };
 
   const { error } = await supabase.from('system_events').insert(row);

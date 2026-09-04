@@ -1,5 +1,4 @@
 import { serve, json, errorResponse, createSupabaseClient, authenticateRequest, handleError } from '../_shared.ts';
-import { emitSystemEvent } from '../automation_helpers.ts';
 
 serve(async (req: Request) => {
   try {
@@ -144,20 +143,11 @@ async function handleUpdateBookingStatus(supabase: ReturnType<typeof createSupab
     await supabase.from('payments').update({ status: 'failed' }).eq('booking_id', bookingId).neq('status', 'successful');
   }
 
-  if (status === 'confirmed' || status === 'completed') {
-    await emitSystemEvent(supabase, updated.tenant_id, status === 'confirmed' ? 'booking_confirmed' : 'booking_completed', {
-      booking_id: updated.id,
-      client_id: updated.client_id,
-      artisan_id: updated.artisan_id,
-      status: updated.status
-    }, 'bookings', auth.sub, 'booking', updated.id);
-  }
-
   return json({ booking: updated });
 }
 
 async function handleCreateBooking(supabase: ReturnType<typeof createSupabaseClient>, auth: any, body: any) {
-  const { slot_id, service_id, artisan_id, notes, payment_mode = 'instant' } = body;
+  const { slot_id, service_id, artisan_id, staff_id, notes, payment_mode = 'instant' } = body;
   if (!slot_id || !service_id || !artisan_id) {
     return errorResponse('slot_id, service_id, and artisan_id are required', 400);
   }
@@ -186,10 +176,6 @@ async function handleCreateBooking(supabase: ReturnType<typeof createSupabaseCli
     return errorResponse('Booking details do not match slot', 400);
   }
 
-  if (slot.status !== 'available') {
-    return errorResponse('Slot is not available', 409);
-  }
-
   const { data: service, error: serviceError } = await supabase
     .from('services')
     .select('price_cents, currency')
@@ -200,48 +186,36 @@ async function handleCreateBooking(supabase: ReturnType<typeof createSupabaseCli
     return errorResponse('Service not found', 404);
   }
 
-  const { data: booking, error: bookingError } = await supabase
-    .from('bookings')
-    .insert({
-      tenant_id,
-      slot_id,
-      service_id,
-      artisan_id,
-      client_id,
-      user_id: client_id,
-      status: 'pending',
-      payment_mode,
-      total_amount: service.price_cents,
-      notes,
-      metadata: {}
-    })
-    .select()
-    .single();
+  const suppliedKey = String(body.idempotency_key ?? '');
+  const requestKey = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(suppliedKey)
+    ? suppliedKey : crypto.randomUUID();
+  const existing = await supabase.from('bookings').select('*').eq('idempotency_key', requestKey).eq('tenant_id', tenant_id).maybeSingle();
+  if (existing.error) return errorResponse(existing.error.message, 500);
+  if (existing.data) return json({ booking: existing.data, cached: true });
 
-  if (bookingError || !booking) {
-    return errorResponse(bookingError?.message ?? 'Could not create booking', 500);
+  const quoteExpiry = new Date(Date.now() + 5 * 60_000).toISOString();
+  const { data: quote, error: quoteError } = await supabase.from('quote_snapshots').insert({
+    tenant_id, slot_id, service_id, customer_id: client_id, currency: service.currency ?? 'NGN',
+    subtotal: service.price_cents, discount: 0, customer_fee: 0, total: service.price_cents,
+    pricing_version: 'booking-v1', expires_at: quoteExpiry,
+  }).select('id').single();
+  if (quoteError || !quote) return errorResponse(quoteError?.message ?? 'Could not persist quote', 500);
+
+  const { data: held, error: holdError } = await supabase.rpc('create_slot_hold', {
+    target_slot_id: slot_id, target_service_id: service_id, target_customer_id: client_id,
+    target_tenant_id: tenant_id, target_quote_snapshot_id: quote.id, request_key: requestKey,
+    hold_minutes: 15, target_staff_id: staff_id ?? null,
+  });
+  if (holdError || !held) {
+    const conflict = holdError?.message?.includes('SLOT_UNAVAILABLE') || holdError?.code === '23P01';
+    return errorResponse(conflict ? 'Slot is not available' : holdError?.message ?? 'Could not hold slot', conflict ? 409 : 500);
   }
 
-  const { error: slotUpdateError } = await supabase
-    .from('booking_slots')
-    .update({ status: 'held', held_by_user_id: client_id, booking_id: booking.id })
-    .eq('id', slot_id);
-
-  if (slotUpdateError) {
-    await supabase.from('bookings').delete().eq('id', booking.id);
-    return errorResponse('Failed to lock booking slot', 500);
-  }
-
-  const { data: artisan } = await supabase.from('artisans').select('user_id').eq('id', artisan_id).single();
-  await emitSystemEvent(supabase, booking.tenant_id, 'booking_created', {
-    booking_id: booking.id,
-    client_id,
-    artisan_id,
-    artisan_user_id: artisan?.user_id,
-    service_id,
-    slot_id,
-    payment_mode
-  }, 'bookings', auth.sub, 'booking', booking.id);
-
-  return json({ booking });
+  const bookingId = Array.isArray(held) ? held[0]?.id : held.id;
+  const { data: booking, error: updateError } = await supabase.from('bookings').update({
+    user_id: client_id, payment_mode, total_amount: service.price_cents, notes,
+    metadata: { quote_snapshot_id: quote.id, pricing_version: 'booking-v1' },
+  }).eq('id', bookingId).select('*').single();
+  if (updateError || !booking) return errorResponse(updateError?.message ?? 'Booking hold persisted but response could not be loaded', 500);
+  return json({ booking, quote: { id: quote.id, expires_at: quoteExpiry } });
 }

@@ -47,10 +47,20 @@ test.describe('Connected commerce runtime', () => {
     await loginAs(context, TEST_ADMIN);
     const runtime = await context.request.get('/api/operator/runtime');
     expect(runtime.ok()).toBeTruthy();
-    const evidence = (await runtime.json()).evidence;
+    const runtimePayload = await runtime.json();
+    const evidence = runtimePayload.evidence;
     expect(evidence.events).toBeGreaterThanOrEqual(8);
     expect(evidence.ledger_entries).toBeGreaterThanOrEqual(6);
     expect(evidence.audits).toBeGreaterThanOrEqual(8);
+    expect(evidence.flow_instances).toBeGreaterThanOrEqual(1);
+    const flow = runtimePayload.recent_flows.find((item: { workflowId: string }) => item.workflowId === booking.id);
+    expect(flow.status).toBe('COMPLETED');
+    expect(flow.checkpoints.map((item: { key: string }) => item.key).sort()).toEqual(['booking_confirmed', 'service_completed']);
+    const traceResponse = await context.request.get(`/api/operator/flows?flowId=${flow.id}`);
+    expect(traceResponse.ok()).toBeTruthy();
+    const trace = (await traceResponse.json()).trace;
+    expect(trace.audit.some((item: { action: string }) => item.action === 'flow.completed')).toBeTruthy();
+    expect(trace.instance.correlationId).toBeTruthy();
   });
 
   test('owner payment policy is protected and versioned', async ({ context, page }) => {

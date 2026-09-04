@@ -46,4 +46,18 @@ This audit maps the current P0 UI to its real execution path. `local adapter` me
 | Analytics | bookings, reviews, ledger | derived KPIs |
 | Operator | audit, workflow, payment | protected runtime evidence |
 
-Current honest decision: `KAJOLA_CONNECTED_RUNTIME_PARTIAL` until the external and production-durability gates above pass.
+## RC1 R1 durability update — 2026-09-04
+
+The code path is now `R1_SUPABASE_READY_WITH_EXTERNAL_BLOCKER`:
+
+- Sandbox/production fail closed and cannot select the local adapter.
+- Connected booking creation persists an immutable quote and calls the transaction-safe `create_slot_hold` RPC.
+- Actual PostgreSQL exclusion constraints cover overlapping active staff and solo-provider reservations.
+- The existing orchestration repository now has a Supabase implementation, atomic aggregate RPC, leased worker, heartbeat, timers, callbacks, retries and dead letters.
+- Business readiness and publication are durable and server guarded.
+- Consumer/provider/platform RLS definitions were tightened; blanket tenant access was removed from private commerce state.
+- Payment webhooks are signed, verified, durably deduplicated and ledger-producing.
+
+Live migration, RLS, race and restart execution remain blocked by Supabase HTTP 401 and the unavailable local Docker engine. See `docs/certification/rc1/R1_SUPABASE.md`.
+
+Current honest decision: `R1_SUPABASE_READY_WITH_EXTERNAL_BLOCKER`.

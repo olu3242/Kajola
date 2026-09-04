@@ -1,5 +1,4 @@
 import { serve, json, errorResponse, createSupabaseClient, authenticateRequest, handleError, ApiError } from '../_shared.ts';
-import { emitSystemEvent } from '../automation_helpers.ts';
 
 type ProviderResult = { ok: boolean; raw: Record<string, unknown>; status: string };
 
@@ -54,7 +53,7 @@ async function initiatePayment(supabase: ReturnType<typeof createSupabaseClient>
   if (!['paystack', 'stripe'].includes(provider)) throw new ApiError('Unsupported payment provider', 400);
 
   const booking = await getAuthorizedBooking(supabase, auth, booking_id);
-  if (!['pending', 'awaiting_payment'].includes(booking.status)) {
+  if (!['held', 'pending', 'awaiting_payment'].includes(booking.status)) {
     throw new ApiError('Booking is not payable', 409);
   }
 
@@ -97,7 +96,7 @@ async function initiatePayment(supabase: ReturnType<typeof createSupabaseClient>
 
   const { data: updatedBooking, error: updateError } = await supabase
     .from('bookings')
-    .update({ status: booking.status === 'pending' ? 'awaiting_payment' : booking.status, total_amount: finalAmount, payment_reference: reference })
+    .update({ status: ['held', 'pending'].includes(booking.status) ? 'awaiting_payment' : booking.status, total_amount: finalAmount, payment_reference: reference })
     .eq('id', booking_id)
     .select()
     .single();
@@ -153,16 +152,6 @@ async function verifyPayment(supabase: ReturnType<typeof createSupabaseClient>, 
     .eq('id', payment.id);
   if (payError) throw new ApiError(payError.message, 500);
 
-  await emitSystemEvent(supabase, booking.tenant_id, 'payment_successful', {
-    payment_id: payment.id,
-    booking_id: bookingId,
-    client_id: booking.client_id,
-    artisan_id: booking.artisan_id,
-    reference: payment.reference,
-    amount_cents: payment.amount_cents,
-    currency: payment.currency
-  }, 'payments', auth.sub, 'payment', payment.id);
-
   if (booking.payment_mode === 'escrow') {
     const { error: escrowError } = await supabase.rpc('create_booking_escrow', { target_booking_id: bookingId, target_payment_id: payment.id });
     if (escrowError) throw new ApiError(escrowError.message, 500);
@@ -179,7 +168,7 @@ async function retryPayment(supabase: ReturnType<typeof createSupabaseClient>, a
   const { bookingId, provider = 'paystack' } = body;
   if (!bookingId) throw new ApiError('bookingId is required', 400);
   const booking = await getAuthorizedBooking(supabase, auth, bookingId);
-  if (!['awaiting_payment', 'pending'].includes(booking.status)) throw new ApiError('Booking cannot be retried', 409);
+  if (!['held', 'awaiting_payment', 'pending'].includes(booking.status)) throw new ApiError('Booking cannot be retried', 409);
   await supabase.from('payments').update({ status: 'failed' }).eq('booking_id', bookingId).neq('status', 'successful');
   return initiatePayment(supabase, auth, {
     booking_id: bookingId,
@@ -213,23 +202,25 @@ async function getBooking(supabase: ReturnType<typeof createSupabaseClient>, boo
 }
 
 async function createProviderCheckout(provider: string, reference: string, amount: number, currency: string, callbackUrl: string, mobileCallbackUrl: string) {
-  if (provider === 'paystack' && Deno.env.get('PAYSTACK_SECRET_KEY')) {
+  if (provider === 'paystack') {
+    const secret = Deno.env.get('PAYSTACK_SECRET_KEY');
+    if (!secret) throw new ApiError('DEPENDENCY_UNAVAILABLE: PAYSTACK_SECRET_KEY_MISSING', 503);
     const res = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${Deno.env.get('PAYSTACK_SECRET_KEY')}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount, currency, reference, callback_url: callbackUrl, metadata: { mobile_callback_url: mobileCallbackUrl } })
     });
     const payload = await res.json();
     if (!res.ok || !payload.status) throw new ApiError(payload.message ?? 'Payment initialization failed', 502);
     return payload.data.authorization_url;
   }
-  return `https://paystack.com/pay/${reference}`;
+  throw new ApiError('Unsupported payment provider', 400);
 }
 
 async function verifyWithProvider(provider: string, reference: string): Promise<ProviderResult> {
   if (provider === 'paystack') {
     const key = Deno.env.get('PAYSTACK_SECRET_KEY');
-    if (!key) return { ok: reference.length > 0, status: 'success', raw: { provider, reference, mode: 'local_verified' } };
+    if (!key) throw new ApiError('DEPENDENCY_UNAVAILABLE: PAYSTACK_SECRET_KEY_MISSING', 503);
     const res = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, { headers: { Authorization: `Bearer ${key}` } });
     const raw = await res.json();
     return { ok: Boolean(res.ok && raw.status && raw.data?.status === 'success'), status: raw.data?.status ?? 'failed', raw };

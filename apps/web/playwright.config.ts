@@ -27,10 +27,14 @@ export default defineConfig({
   ],
 
   webServer: {
-    command:              'npm run dev',
+    command:              'npm run build && npm run start',
     url:                  'http://localhost:3000',
-    reuseExistingServer:  true,
-    timeout:              60_000,
+    reuseExistingServer:  false,
+    timeout:              120_000,
     cwd:                  '.',
+    env: {
+      KAJOLA_RUNTIME_MODE: 'local',
+      APP_ENV: 'test',
+    },
   },
 });
