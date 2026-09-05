@@ -47,18 +47,22 @@ async function handleWebhook(body: any, rawBody: string) {
   const successful = reportedSuccessful && verification.ok && bindingValid;
 
   if (successful) {
-    const { data: outcome, error: processError } = await supabase.rpc('process_verified_payment', {
-      target_payment_id: payment.id,
-      target_provider_event_id: providerEventId,
-      target_correlation_id: crypto.randomUUID(),
-      verification_payload: verification.raw,
-    });
+    const result = payment.purpose === 'TIP'
+      ? await supabase.rpc('process_verified_tip', {
+          target_payment_id: payment.id, target_provider_event_id: providerEventId,
+          target_correlation_id: crypto.randomUUID(),
+        })
+      : await supabase.rpc('process_verified_payment', {
+          target_payment_id: payment.id, target_provider_event_id: providerEventId,
+          target_correlation_id: crypto.randomUUID(), verification_payload: verification.raw,
+        });
+    const { data: outcome, error: processError } = result;
     if (processError) throw new ApiError(processError.message, 500);
     return json({ success: true, verified: true, event_id: providerEventId, outcome });
   } else {
     await supabase.from('payments').update({ status: 'failed', raw_response: { webhook: body, verification: verification.raw } })
       .eq('id', payment.id).neq('status', 'successful');
-    await supabase.rpc('fail_payment', { target_booking_id: payment.booking_id });
+    if (payment.purpose !== 'TIP') await supabase.rpc('fail_payment', { target_booking_id: payment.booking_id });
   }
 
   await markProviderEvent(supabase, providerEventId, successful ? 'PROCESSED' : 'REJECTED', successful ? null : 'Provider verification did not confirm success');

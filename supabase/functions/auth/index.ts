@@ -111,9 +111,7 @@ async function handleSendOtp(supabase: ReturnType<typeof createSupabaseClient>, 
 async function deliverOtp(phone: string, code: string): Promise<void> {
   const termiiKey = Deno.env.get('TERMII_API_KEY');
   if (!termiiKey) {
-    // Local dev without Termii configured — log to console only
-    console.warn(`[DEV] OTP for ${phone}: ${code}`);
-    return;
+    throw new ApiError('DEPENDENCY_UNAVAILABLE: TERMII_API_KEY_MISSING', 503);
   }
 
   const senderId = Deno.env.get('TERMII_SENDER_ID') ?? 'Kajola';
@@ -133,9 +131,8 @@ async function deliverOtp(phone: string, code: string): Promise<void> {
   });
 
   if (!resp.ok) {
-    console.error('Termii SMS delivery failed:', resp.status, await resp.text());
-    // Fail open in production so a Termii outage does not block all logins;
-    // the OTP is still stored — support can retrieve it via audit trail.
+    console.error('Termii SMS delivery failed', { status: resp.status });
+    throw new ApiError('OTP_DELIVERY_FAILED', 502);
   }
 }
 

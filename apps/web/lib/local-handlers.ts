@@ -11,7 +11,8 @@ import {
   StoreUser,
   BookingStatus,
 } from './store';
-import { DEFAULT_COMMERCE_POLICY, depositFor, quoteCheckout, type PaymentMethod, type PaymentPurpose } from './commerce';
+import { buildCommerceSnapshot, DEFAULT_COMMERCE_POLICY, depositFor, quoteCheckout, type PaymentArrangement, type PaymentMethod, type PaymentPurpose } from './commerce';
+import { authorizeAgentAction, evaluateSettlementEligibility, reconcilePayment, settlementCommand } from './marketplace-operations';
 import { findCategory, searchableText } from './service-taxonomy';
 import { locationSlug } from './nigeria-locations';
 import { createNotification, recordDomainChange } from './domain-runtime';
@@ -245,6 +246,9 @@ export async function holdSlot(
     amount_paid_kobo: 0,
     balance_due_kobo: service.price_kobo,
     commerce_policy_version: (provider.payment_policy ?? DEFAULT_COMMERCE_POLICY).version,
+    refund_state: 'NONE',
+    reconciliation_state: 'NOT_REQUIRED',
+    risk_state: 'PASSED',
   };
 
   store.bookings.push(booking);
@@ -286,10 +290,23 @@ export async function initPayment(
     return { reference: '', authorization_url: '', error: 'No payment is due for this booking' };
   }
 
-  const existing = store.payments.find((item) => item.booking_id === bookingId && item.method === method && item.purpose === quote.purpose && item.status !== 'failed');
-  if (existing) return { reference: existing.reference, authorization_url: method === 'pay_at_venue' ? `/dashboard/bookings/${bookingId}?payment=at-venue` : `/payment/callback?reference=${existing.reference}&bookingId=${bookingId}` };
+  const offline = method === 'pay_at_venue' || method === 'cash';
+  const arrangement: PaymentArrangement = method === 'cash' ? 'CASH'
+    : method === 'pay_at_venue' ? 'PAY_AT_SERVICE'
+    : quote.purpose === 'deposit' ? 'DEPOSIT'
+    : quote.purpose === 'balance' ? 'PARTIAL' : 'FULL';
+  booking.commerce_snapshot = buildCommerceSnapshot({
+    serviceBaseKobo: booking.total_amount_kobo,
+    processingCostKobo: quote.gateway_fee_kobo,
+    amountPaidKobo: booking.amount_paid_kobo,
+    amountDueNowKobo: offline ? 0 : quote.subtotal_due_kobo,
+    arrangement, method, policy,
+  });
 
-  const reference = `${method === 'pay_at_venue' ? 'VENUE' : 'PAY'}-${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
+  const existing = store.payments.find((item) => item.booking_id === bookingId && item.method === method && item.purpose === quote.purpose && item.status !== 'failed');
+  if (existing) return { reference: existing.reference, authorization_url: offline ? `/dashboard/bookings/${bookingId}?payment=offline` : `/payment/callback?reference=${existing.reference}&bookingId=${bookingId}` };
+
+  const reference = `${offline ? 'OFFLINE' : 'PAY'}-${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
 
   const payment = {
     id: randomUUID(),
@@ -305,6 +322,8 @@ export async function initPayment(
     platform_fee_kobo: quote.platform_fee_kobo,
     provider_net_kobo: quote.provider_net_kobo,
     policy_version: quote.policy_version,
+    arrangement,
+    verification_state: 'PENDING' as const,
   };
   store.payments.push(payment);
 
@@ -316,7 +335,7 @@ export async function initPayment(
   booking.payment_status = 'pending';
   booking.payment_ref = reference;
 
-  if (method === 'pay_at_venue') {
+  if (offline) {
     booking.status = 'confirmed';
     booking.booking_state = 'CONFIRMED';
     booking.hold_state = 'CONVERTED';
@@ -326,15 +345,15 @@ export async function initPayment(
     booking.payment_status = booking.amount_paid_kobo > 0 ? 'partially_paid' : 'unpaid';
   }
   recordDomainChange({ eventType: 'payment.intent_created', actor: user, tenantId: booking.tenant_id, aggregateType: 'payment', aggregateId: payment.id, newState: { status: payment.status }, payload: { booking_id: booking.id, reference, method, purpose: payment.purpose, amount_kobo: payment.amount_kobo } });
-  if (method === 'pay_at_venue') {
+  if (offline) {
     const confirmationEvent = recordDomainChange({ eventType: 'booking.confirmed', actor: user, tenantId: booking.tenant_id, aggregateType: 'booking', aggregateId: booking.id, newState: { status: booking.status, payment_status: booking.payment_status }, payload: { booking_id: booking.id, method } });
     await processBookingFlowEvent(booking, confirmationEvent, user);
   }
 
   return {
     reference,
-    authorization_url: method === 'pay_at_venue'
-      ? `/dashboard/bookings/${bookingId}?payment=at-venue`
+    authorization_url: offline
+      ? `/dashboard/bookings/${bookingId}?payment=offline`
       : `/payment/callback?reference=${reference}&bookingId=${bookingId}`,
   };
 }
@@ -500,9 +519,14 @@ export async function updateBookingStatus(
   }
 
   const current = booking.status;
+  if (current === newStatus) return { booking };
 
   if (user.role === 'artisan') {
-    if (newStatus === 'no_show') {
+    if (newStatus === 'cancelled') {
+      if (!['confirmed','checked_in'].includes(current)) return { error: `Cannot cancel booking from ${current}` };
+    } else if (newStatus === 'acknowledged') {
+      if (current !== 'confirmed' || booking.fulfillment_state !== 'SCHEDULED') return { error: `Cannot acknowledge booking from ${current}` };
+    } else if (newStatus === 'no_show') {
       if (current !== 'in_progress' && current !== 'confirmed') {
         return { error: `Cannot transition from ${current} to no_show` };
       }
@@ -533,17 +557,35 @@ export async function updateBookingStatus(
     }
   }
 
-  booking.status = newStatus as BookingStatus;
+  if (newStatus !== 'acknowledged') booking.status = newStatus as BookingStatus;
   if (newStatus === 'cancelled') {
     booking.booking_state = 'CANCELLED'; booking.hold_state = 'RELEASED'; booking.fulfillment_state = 'CANCELLED';
-  } else if (newStatus === 'checked_in') booking.fulfillment_state = 'CUSTOMER_CHECKED_IN';
+    booking.settlement_state = 'HELD';
+    if (user.role === 'artisan') {
+      booking.recovery_state = 'REQUIRED';
+      if (!store.recoveryCases.some((item) => item.booking_id === booking.id && item.failure_reason === 'PROVIDER_CANCELLATION')) {
+        const payment = store.payments.find((item) => item.booking_id === booking.id && item.status === 'success');
+        store.recoveryCases.push({ id: randomUUID(), booking_id: booking.id, payment_id: payment?.id ?? '', state: 'REQUIRED',
+          failure_reason: 'PROVIDER_CANCELLATION', policy_version: 'recovery-v1', recommendations: [], created_at: new Date().toISOString() });
+      }
+      createNotification(booking.client_id, 'booking.provider_cancelled', { booking_id: booking.id, recovery_state: 'REQUIRED' });
+    }
+  } else if (newStatus === 'acknowledged') booking.fulfillment_state = 'PROVIDER_ACKNOWLEDGED';
+  else if (newStatus === 'checked_in') booking.fulfillment_state = 'CUSTOMER_CHECKED_IN';
   else if (newStatus === 'in_progress') booking.fulfillment_state = 'IN_PROGRESS';
   else if (newStatus === 'completed') { booking.booking_state = 'COMPLETED'; booking.fulfillment_state = 'COMPLETED'; }
   else if (newStatus === 'no_show') booking.fulfillment_state = 'NO_SHOW';
-  const eventName: Record<string, string> = { cancelled: 'booking.cancelled', checked_in: 'booking.checked_in', in_progress: 'booking.started', completed: 'booking.completed', no_show: 'booking.no_show' };
+  const eventName: Record<string, string> = { acknowledged: 'booking.acknowledged', cancelled: 'booking.cancelled', checked_in: 'booking.checked_in', in_progress: 'booking.started', completed: 'booking.completed', no_show: 'booking.no_show' };
   const event = recordDomainChange({ eventType: eventName[newStatus] ?? 'booking.updated', actor: user, tenantId: booking.tenant_id, aggregateType: 'booking', aggregateId: booking.id, oldState: { status: current }, newState: { status: booking.status } });
   if (newStatus === 'completed') {
-    booking.settlement_status = booking.payment_status === 'paid' ? 'available' : 'not_due';
+    const eligibility = evaluateSettlementEligibility({
+      paymentConfirmed: booking.payment_status === 'paid', fulfillmentState: booking.fulfillment_state,
+      activeRefund: !['NONE', 'FAILED'].includes(booking.refund_state ?? 'NONE'),
+      activeDispute: booking.status === 'disputed', activeRecovery: !['NONE', 'RESOLVED', 'ACCEPTED'].includes(booking.recovery_state),
+      providerEligible: true, riskPassed: booking.risk_state === 'PASSED',
+    });
+    booking.settlement_state = eligibility.state;
+    booking.settlement_status = eligibility.eligible ? 'available' : 'not_due';
   }
   await processBookingFlowEvent(booking, event, user);
 
@@ -612,6 +654,9 @@ export async function submitGratuity(
     amount_kobo: body.amount_kobo,
     message: body.message ?? '',
     created_at: new Date().toISOString(),
+    payment_status: 'CONFIRMED',
+    provider_entitlement_kobo: body.amount_kobo,
+    settlement_state: 'ELIGIBLE',
   };
   store.gratuities.push(gratuity);
   store.ledger.push(
@@ -621,6 +666,70 @@ export async function submitGratuity(
   recordDomainChange({ eventType: 'gratuity.received', actor: user, tenantId: booking.tenant_id, aggregateType: 'gratuity', aggregateId: gratuity.id, newState: { amount_kobo: gratuity.amount_kobo }, payload: { booking_id: booking.id, provider_id: booking.provider_id } });
   createNotification(booking.provider_id, 'gratuity.received', { booking_id: booking.id, amount_kobo: gratuity.amount_kobo });
   return { gratuity };
+}
+
+export function queueLocalSettlement(user: StoreUser, bookingId: string) {
+  const booking = store.bookings.find((item) => item.id === bookingId);
+  if (!booking) return { error: 'Booking not found' };
+  if (user.role === 'client' || (user.role !== 'admin' && booking.tenant_id !== user.tenant_id && booking.provider_id !== user.id)) return { error: 'Forbidden' };
+  const eligibility = evaluateSettlementEligibility({ paymentConfirmed: booking.payment_status === 'paid',
+    fulfillmentState: booking.fulfillment_state, activeRefund: !['NONE','FAILED'].includes(booking.refund_state ?? 'NONE'),
+    activeDispute: booking.status === 'disputed', activeRecovery: !['NONE','RESOLVED','ACCEPTED'].includes(booking.recovery_state),
+    providerEligible: true, riskPassed: booking.risk_state === 'PASSED' });
+  if (!eligibility.eligible) return { error: `Settlement blocked: ${eligibility.blockers.join(',')}`, eligibility };
+  const existing = store.settlements.find((item) => item.booking_id === booking.id);
+  if (existing) return { settlement: existing, cached: true };
+  const tips = store.gratuities.filter((item) => item.booking_id === booking.id && item.payment_status === 'CONFIRMED').reduce((sum, item) => sum + item.amount_kobo, 0);
+  const amountKobo = (booking.commerce_snapshot?.provider_net_entitlement ?? booking.total_amount_kobo) + tips;
+  const command = settlementCommand({ bookingId: booking.id, providerId: booking.provider_id, amountKobo });
+  const settlement = { id: randomUUID(), booking_id: booking.id, provider_id: booking.provider_id, tenant_id: booking.tenant_id,
+    amount_kobo: amountKobo, state: 'QUEUED' as const, idempotency_key: command.idempotencyKey, attempts: 0, created_at: new Date().toISOString() };
+  store.settlements.push(settlement);
+  booking.settlement_state = 'QUEUED'; booking.settlement_status = 'pending';
+  recordDomainChange({ eventType: 'settlement.queued', actor: user, tenantId: booking.tenant_id, aggregateType: 'settlement', aggregateId: settlement.id,
+    newState: { state: settlement.state, amount_kobo: settlement.amount_kobo }, payload: { booking_id: booking.id, idempotency_key: settlement.idempotency_key } });
+  return { settlement };
+}
+
+export function reconcileLocalPayment(user: StoreUser, bookingId: string, evidence: Parameters<typeof reconcilePayment>[0]) {
+  if (user.role !== 'admin') return { error: 'Forbidden' };
+  const booking = store.bookings.find((item) => item.id === bookingId);
+  if (!booking) return { error: 'Booking not found' };
+  const outcome = reconcilePayment(evidence);
+  const correlationId = randomUUID();
+  for (const type of outcome.exceptions) {
+    if (!store.reconciliationExceptions.some((item) => item.booking_id === booking.id && item.type === type)) {
+      store.reconciliationExceptions.push({ id: randomUUID(), tenant_id: booking.tenant_id, booking_id: booking.id,
+        type, state: 'OPEN', correlation_id: correlationId, created_at: new Date().toISOString() });
+    }
+  }
+  booking.reconciliation_state = outcome.reconciled ? 'MATCHED' : 'EXCEPTION';
+  return { ...outcome, correlation_id: correlationId };
+}
+
+export function attestLocalOfflinePayment(user: StoreUser, paymentId: string, declaredAmountKobo: number) {
+  const payment = store.payments.find((item) => item.id === paymentId && (item.method === 'cash' || item.method === 'pay_at_venue'));
+  const booking = payment && store.bookings.find((item) => item.id === payment.booking_id);
+  if (!payment || !booking) return { error: 'Offline payment not found' };
+  if (user.role === 'client' && booking.client_id === user.id) payment.customer_confirmed_amount_kobo = declaredAmountKobo;
+  else if (user.role === 'artisan' && booking.provider_id === user.id) payment.provider_confirmed_amount_kobo = declaredAmountKobo;
+  else return { error: 'Forbidden' };
+  const bothConfirmed = payment.customer_confirmed_amount_kobo != null && payment.provider_confirmed_amount_kobo != null;
+  if (bothConfirmed) {
+    const matched = payment.customer_confirmed_amount_kobo === payment.amount_kobo && payment.provider_confirmed_amount_kobo === payment.amount_kobo;
+    payment.verification_state = matched ? 'MATCHED' : 'MISMATCH';
+    booking.reconciliation_state = matched ? 'MATCHED' : 'EXCEPTION';
+    if (matched) {
+      payment.status = 'success'; booking.amount_paid_kobo = booking.total_amount_kobo; booking.balance_due_kobo = 0;
+      booking.payment_status = 'paid'; booking.payment_state = 'CONFIRMED'; booking.settlement_state = 'PENDING_ELIGIBILITY';
+    } else booking.settlement_state = 'HELD';
+  }
+  return { payment, booking };
+}
+
+export function requestLocalAgentAction(user: StoreUser, action: string, policyPassed = false, humanApproved = false) {
+  if (user.role !== 'admin') return { error: 'Forbidden' };
+  return authorizeAgentAction({ action, policyPassed, humanApproved });
 }
 
 // ---------------------------------------------------------------------------

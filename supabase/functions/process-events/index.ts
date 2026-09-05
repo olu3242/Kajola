@@ -171,7 +171,7 @@ async function processRule(supabase: ReturnType<typeof createSupabaseClient>, ev
     const actionKey = action.config?.action_key ? String(action.config.action_key) : `${action.action_type}_${index}`;
 
     try {
-      await executeAction(supabase, event, action, runData.attempts);
+      await executeAction(supabase, event, action, runData.attempts, `automation:${event.tenant_id}:${event.id}:${rule.id}:${index}`);
       await logAction(supabase, event, rule, index, action.action_type, actionKey, 'completed', null, runData.attempts);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

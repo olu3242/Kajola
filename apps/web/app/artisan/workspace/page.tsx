@@ -5,15 +5,19 @@ import { AppShell } from '../../components/shells';
 import { Alert, Button, EmptyState, PageHeader, Skeleton } from '../../components/ui';
 
 type Booking = {
-  id: string; status: string; booking_state?: string; hold_state?: string;
+  id: string; status: string; booking_state?: string; hold_state?: string; fulfillment_state?: string;
   starts_at: string; ends_at: string; service_name?: string; client_name?: string;
   total_amount_kobo: number; deposit_paid_at: string | null;
 };
 const transitions: Record<string, { label: string; next: string }[]> = {
-  confirmed: [{ label: 'Check in customer', next: 'checked_in' }],
   checked_in: [{ label: 'Start service', next: 'in_progress' }],
   in_progress: [{ label: 'Mark complete', next: 'completed' }, { label: 'Mark no-show', next: 'no_show' }],
 };
+function availableTransitions(booking: Booking) {
+  if (booking.status === 'confirmed' && booking.fulfillment_state === 'SCHEDULED') return [{ label: 'Acknowledge booking', next: 'acknowledged' }, { label: 'Cancel and open recovery', next: 'cancelled' }];
+  if (booking.status === 'confirmed' && booking.fulfillment_state === 'PROVIDER_ACKNOWLEDGED') return [{ label: 'Check in customer', next: 'checked_in' }, { label: 'Mark no-show', next: 'no_show' }, { label: 'Cancel and open recovery', next: 'cancelled' }];
+  return transitions[booking.status] ?? [];
+}
 function statusTone(status: string) {
   return ['confirmed', 'completed'].includes(status) ? 'success' : ['no_show', 'cancelled', 'expired'].includes(status) ? 'error' : 'info';
 }
@@ -63,8 +67,8 @@ export default function ArtisanWorkspacePage() {
           <p className="kj-muted kj-small">{booking.client_name ?? 'Customer'} · {new Date(booking.starts_at).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}–{new Date(booking.ends_at).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}</p>
           <p className="kj-small">₦{(booking.total_amount_kobo / 100).toLocaleString()} · Deposit {booking.deposit_paid_at ? 'paid' : 'pending'}</p></div>
           <span className={`kj-badge kj-badge--${statusTone(booking.status)}`}>{calendarLabel(booking)}</span></div>
-        {(transitions[booking.status] ?? []).length ? <div className="kj-row" style={{ marginTop: 'var(--space-4)', flexWrap: 'wrap' }}>
-          {transitions[booking.status].map(({ label, next }) => <Button key={next} variant={next === 'no_show' ? 'destructive' : 'secondary'} onClick={() => transition(booking.id, next)} disabled={acting === booking.id} data-testid={`action-${booking.id}-${next}`}>{acting === booking.id ? 'Working…' : label}</Button>)}
+        {availableTransitions(booking).length ? <div className="kj-row" style={{ marginTop: 'var(--space-4)', flexWrap: 'wrap' }}>
+          {availableTransitions(booking).map(({ label, next }) => <Button key={next} variant={next === 'no_show' || next === 'cancelled' ? 'destructive' : 'secondary'} onClick={() => transition(booking.id, next)} disabled={acting === booking.id} data-testid={`action-${booking.id}-${next}`}>{acting === booking.id ? 'Working…' : label}</Button>)}
         </div> : null}
       </article>)}
     </div>}

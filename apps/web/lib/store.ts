@@ -1,5 +1,5 @@
 // In-memory singleton store for LOCAL mode (no Supabase required)
-import type { CommercePolicy, PaymentMethod, PaymentPurpose, PaymentStatus, SettlementStatus } from './commerce';
+import type { CommercePolicy, CommerceSnapshot, PaymentMethod, PaymentPurpose, PaymentStatus, SettlementStatus } from './commerce';
 
 export type BookingStatus =
   | 'pending'
@@ -44,6 +44,10 @@ export interface StoreBooking {
   amount_paid_kobo: number;
   balance_due_kobo: number;
   commerce_policy_version: string;
+  commerce_snapshot?: CommerceSnapshot;
+  refund_state?: 'NONE' | 'REQUESTED' | 'PROCESSING' | 'PARTIALLY_REFUNDED' | 'REFUNDED' | 'FAILED';
+  reconciliation_state?: 'NOT_REQUIRED' | 'PENDING' | 'MATCHED' | 'EXCEPTION' | 'RESOLVED';
+  risk_state?: 'PENDING' | 'PASSED' | 'HELD' | 'BLOCKED';
   flow_instance_id?: string;
 }
 
@@ -109,6 +113,9 @@ export interface StoreGratuity {
   amount_kobo: number;
   message: string;
   created_at: string;
+  payment_status?: 'PENDING' | 'CONFIRMED' | 'FAILED' | 'REFUNDED';
+  provider_entitlement_kobo?: number;
+  settlement_state?: 'NOT_ELIGIBLE' | 'ELIGIBLE' | 'SETTLED' | 'REFUNDED';
 }
 
 export interface StoreUser {
@@ -133,6 +140,10 @@ export interface StorePayment {
   platform_fee_kobo: number;
   provider_net_kobo: number;
   policy_version: string;
+  arrangement?: 'FULL' | 'DEPOSIT' | 'PARTIAL' | 'PAY_AT_SERVICE' | 'CASH';
+  verification_state?: 'PENDING' | 'PROVIDER_VERIFIED' | 'CUSTOMER_CONFIRMED' | 'MATCHED' | 'MISMATCH' | 'FAILED';
+  provider_confirmed_amount_kobo?: number;
+  customer_confirmed_amount_kobo?: number;
 }
 
 export interface StoreLedgerEntry {
@@ -162,10 +173,26 @@ export interface StoreRecoveryCase {
   booking_id: string;
   payment_id: string;
   state: 'REQUIRED' | 'AWAITING_CUSTOMER' | 'ACCEPTED' | 'REFUND_REQUIRED' | 'RESOLVED';
-  failure_reason: 'LATE_PAYMENT_AFTER_HOLD_EXPIRY';
+  failure_reason: 'LATE_PAYMENT_AFTER_HOLD_EXPIRY' | 'PROVIDER_CANCELLATION';
   policy_version: string;
   recommendations: StoreRecoveryRecommendation[];
   created_at: string;
+}
+
+export interface StoreSettlement {
+  id: string; booking_id: string; provider_id: string; tenant_id: string;
+  amount_kobo: number; state: 'QUEUED' | 'PROCESSING' | 'SETTLED' | 'FAILED' | 'RETRY_REQUIRED' | 'HELD' | 'REVERSED';
+  idempotency_key: string; attempts: number; created_at: string;
+}
+
+export interface StoreReconciliationException {
+  id: string; tenant_id: string; booking_id: string; type: string;
+  state: 'OPEN' | 'INVESTIGATING' | 'RESOLVED'; correlation_id: string; created_at: string;
+}
+
+export interface StoreAgentRecommendation {
+  id: string; tenant_id: string | null; resource_id: string; summary: string;
+  runtime_state: 'AVAILABLE' | 'BLOCKED_EXTERNAL' | 'FAILED' | 'DISABLED'; correlation_id: string; created_at: string;
 }
 
 export interface StoreNotification {
@@ -421,6 +448,9 @@ const events: StoreDomainEvent[] = [];
 const audits: StoreAuditRecord[] = [];
 const workflows: StoreWorkflowJob[] = [];
 const recoveryCases: StoreRecoveryCase[] = [];
+const settlements: StoreSettlement[] = [];
+const reconciliationExceptions: StoreReconciliationException[] = [];
+const agentRecommendations: StoreAgentRecommendation[] = [];
 
 const initialStore = {
   providers,
@@ -437,6 +467,9 @@ const initialStore = {
   audits,
   workflows,
   recoveryCases,
+  settlements,
+  reconciliationExceptions,
+  agentRecommendations,
 };
 
 const globalForKajola = globalThis as typeof globalThis & {

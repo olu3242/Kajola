@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '@/app/components/shells';
 import { DEFAULT_COMMERCE_POLICY, type CommercePolicy, type FeeBearer, type PaymentMethod } from '@/lib/commerce';
 
-const methods: Array<[PaymentMethod, string]> = [['bank_transfer', 'Bank transfer'], ['card', 'Card'], ['ussd', 'USSD'], ['bank_account', 'Bank account'], ['pay_at_venue', 'Pay at venue']];
+const methods: Array<[PaymentMethod, string]> = [['bank_transfer', 'Bank transfer'], ['card', 'Card'], ['ussd', 'USSD'], ['bank_account', 'Bank account'], ['payment_link', 'Payment link'], ['pay_at_venue', 'Pay at venue'], ['cash', 'Cash']];
 
 export default function PaymentSettingsPage() {
   const [policy, setPolicy] = useState<CommercePolicy>(DEFAULT_COMMERCE_POLICY);

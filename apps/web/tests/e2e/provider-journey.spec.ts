@@ -49,7 +49,7 @@ test.describe('Provider workspace', () => {
     await expect(page.locator('[data-testid^="workspace-booking-"]').first()).toBeVisible({ timeout: 5000 });
   });
 
-  test('full fulfillment: confirmed → checked_in → in_progress → completed', async ({ context, page }) => {
+  test('full fulfillment: confirmed → acknowledged → checked_in → in_progress → completed', async ({ context, page }) => {
     // Setup: client books
     await loginAs(context, TEST_CLIENT);
     const bookingId = await createConfirmedBooking(context);
@@ -58,6 +58,11 @@ test.describe('Provider workspace', () => {
     await loginAs(context, TEST_ARTISAN);
     await page.goto('/artisan/workspace');
     await page.waitForLoadState('networkidle');
+
+    // Provider acknowledgement is distinct from customer check-in.
+    const acknowledgeBtn = page.getByTestId(`action-${bookingId}-acknowledged`);
+    await expect(acknowledgeBtn).toBeVisible({ timeout: 5000 });
+    await acknowledgeBtn.click();
 
     // Click check-in
     const checkinBtn = page.getByTestId(`action-${bookingId}-checked_in`);

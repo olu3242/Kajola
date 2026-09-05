@@ -11,7 +11,9 @@ const METHODS: Array<{ id: PaymentMethod; label: string; note: string }> = [
   { id: 'card', label: 'Card', note: 'Visa, Mastercard, or Verve' },
   { id: 'ussd', label: 'USSD', note: 'Pay from your phone without mobile data' },
   { id: 'bank_account', label: 'Bank account', note: 'Authorize payment from a supported bank' },
+  { id: 'payment_link', label: 'Payment link', note: 'Open a secure provider-hosted payment link' },
   { id: 'pay_at_venue', label: 'Pay at venue', note: 'Reserve now and pay the business in person' },
+  { id: 'cash', label: 'Cash', note: 'Pay the declared collector; reconciliation remains pending until verified' },
 ];
 const money = (kobo: number) => `₦${(kobo / 100).toLocaleString('en-NG')}`;
 
@@ -49,10 +51,10 @@ export default function PayPage() {
         <h2 id="payment-method-heading">How would you like to pay?</h2>
         <div className="kj-payment-methods">{METHODS.filter((item) => quote.methods.includes(item.id)).map((item) => <label className={`kj-payment-method${method === item.id ? ' is-selected' : ''}`} key={item.id}><input type="radio" name="payment-method" value={item.id} checked={method === item.id} onChange={() => setMethod(item.id)} /><span><strong>{item.label}</strong><small>{item.note}</small></span></label>)}</div>
         {error ? <p className="kj-form-error" role="alert">{error}</p> : null}
-        <button className="kj-btn kj-btn--primary kj-btn--block" onClick={handlePay} disabled={paying} data-testid="pay-deposit-btn">{paying ? 'Starting securely…' : method === 'pay_at_venue' ? 'Reserve and pay at venue' : `Pay ${money(quote.customer_total_kobo)}`}</button>
+        <button className="kj-btn kj-btn--primary kj-btn--block" onClick={handlePay} disabled={paying} data-testid="pay-deposit-btn">{paying ? 'Starting securely…' : method === 'pay_at_venue' || method === 'cash' ? 'Reserve with offline payment due' : `Pay ${money(quote.customer_total_kobo)}`}</button>
         <p className="kj-muted">This slot is temporarily held for five minutes—it is not confirmed yet. Kajola confirms payment server-side.</p>
       </section>
-      <aside className="kj-card kj-price-breakdown" aria-label="Price breakdown"><span className="kj-eyebrow">Appointment</span><h2>{booking.service_name ?? 'Service'}</h2><p>{booking.provider_name}</p><p>{new Date(booking.starts_at).toLocaleString('en-NG', { dateStyle: 'full', timeStyle: 'short' })}</p><hr /><div><span>Service total</span><strong>{money(quote.service_amount_kobo)}</strong></div>{quote.previously_paid_kobo > 0 ? <div><span>Already paid</span><strong>−{money(quote.previously_paid_kobo)}</strong></div> : null}<div><span>{quote.purpose === 'deposit' ? 'Deposit due now' : 'Amount due now'}</span><strong>{money(quote.subtotal_due_kobo)}</strong></div>{quote.gateway_fee_kobo > 0 ? <div><span>Processing fee</span><strong>{money(quote.gateway_fee_kobo)}</strong></div> : null}<div className="kj-price-total"><span>{method === 'pay_at_venue' ? 'Due at venue' : 'Pay now'}</span><strong>{money(quote.customer_total_kobo)}</strong></div><p className="kj-muted">Balance after this payment: {money(quote.balance_after_payment_kobo)}</p></aside>
+      <aside className="kj-card kj-price-breakdown" aria-label="Price breakdown"><span className="kj-eyebrow">Appointment</span><h2>{booking.service_name ?? 'Service'}</h2><p>{booking.provider_name}</p><p>{new Date(booking.starts_at).toLocaleString('en-NG', { dateStyle: 'full', timeStyle: 'short' })}</p><hr /><div><span>Service total</span><strong>{money(quote.service_amount_kobo)}</strong></div>{quote.previously_paid_kobo > 0 ? <div><span>Already paid</span><strong>−{money(quote.previously_paid_kobo)}</strong></div> : null}<div><span>{quote.purpose === 'deposit' ? 'Deposit due now' : 'Amount due now'}</span><strong>{money(quote.subtotal_due_kobo)}</strong></div>{quote.gateway_fee_kobo > 0 ? <div><span>Processing fee</span><strong>{money(quote.gateway_fee_kobo)}</strong></div> : null}<div className="kj-price-total"><span>{method === 'pay_at_venue' || method === 'cash' ? 'Due at service' : 'Pay now'}</span><strong>{money(quote.customer_total_kobo)}</strong></div><p className="kj-muted">Balance after this payment: {money(quote.balance_after_payment_kobo)}</p></aside>
     </div>}
   </AppShell>;
 }

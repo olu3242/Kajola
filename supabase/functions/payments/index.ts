@@ -48,25 +48,36 @@ async function handleHistory(supabase: ReturnType<typeof createSupabaseClient>, 
 }
 
 async function initiatePayment(supabase: ReturnType<typeof createSupabaseClient>, auth: any, body: any) {
-  const { booking_id, amount_cents, currency = 'NGN', provider = 'paystack', discount_code } = body;
-  if (!booking_id || !amount_cents) throw new ApiError('booking_id and amount_cents are required', 400);
-  if (!['paystack', 'stripe'].includes(provider)) throw new ApiError('Unsupported payment provider', 400);
+  const booking_id = body.booking_id ?? body.bookingId;
+  const paymentMethod = body.payment_method ?? body.method ?? 'bank_transfer';
+  const provider = body.provider ?? 'paystack';
+  if (!booking_id) throw new ApiError('booking_id is required', 400);
+  if (!['card','bank_transfer','payment_link','ussd','bank_account','pay_at_venue','cash'].includes(paymentMethod)) throw new ApiError('Unsupported payment method', 400);
+  if (!['paystack'].includes(provider)) throw new ApiError('Unsupported payment provider', 400);
 
   const booking = await getAuthorizedBooking(supabase, auth, booking_id);
   if (!['held', 'pending', 'awaiting_payment'].includes(booking.status)) {
     throw new ApiError('Booking is not payable', 409);
   }
 
-  const tenant = await loadTenantForBooking(supabase, booking.tenant_id);
-  const discount = discount_code ? await calculateDiscount(supabase, booking.tenant_id, discount_code, amount_cents) : { amount: 0, id: null, used_count: 0 };
-  const finalAmount = Math.max(0, amount_cents - discount.amount);
-  const platformFee = Math.max(0, Math.round(finalAmount * Number(tenant.platform_fee_percent ?? 10) / 100));
-  const netAmount = Math.max(0, finalAmount - platformFee);
+  const { data: quote, error: quoteError } = await supabase.from('quote_snapshots').select('*').eq('id', booking.quote_snapshot_id).single();
+  if (quoteError || !quote) throw new ApiError('Immutable commerce snapshot not found', 409);
+  const requestedPurpose = String(body.purpose ?? quote.payment_arrangement ?? 'FULL').toUpperCase();
+  if (quote.expires_at <= new Date().toISOString() && requestedPurpose !== 'BALANCE') throw new ApiError('Commerce snapshot expired', 409);
+  const { data: priorPayments } = await supabase.from('payments').select('amount_cents').eq('booking_id', booking_id).eq('status', 'successful').neq('purpose', 'TIP');
+  const previouslyPaid = (priorPayments ?? []).reduce((sum: number, item: any) => sum + Number(item.amount_cents), 0);
+  const outstanding = Math.max(0, Number(quote.customer_total) - previouslyPaid);
+  const offline = paymentMethod === 'pay_at_venue' || paymentMethod === 'cash';
+  const finalAmount = offline || requestedPurpose === 'BALANCE' ? outstanding : Math.min(outstanding, Number(quote.amount_due_now));
+  if (finalAmount <= 0) throw new ApiError('No payment is due', 409);
+  if (body.amount_cents != null && Number(body.amount_cents) !== finalAmount) throw new ApiError('Amount does not match immutable commerce snapshot', 409);
+  const currency = String(quote.currency).toUpperCase();
+  if (body.currency && String(body.currency).toUpperCase() !== currency) throw new ApiError('Currency does not match immutable commerce snapshot', 409);
+  const paymentPurpose = offline ? 'OFFLINE' : ['FULL','DEPOSIT','BALANCE'].includes(requestedPurpose) ? requestedPurpose : 'FULL';
 
   const reference = `${provider}_${crypto.randomUUID()}`;
   const callbackUrl = `${Deno.env.get('WEB_PAYMENT_CALLBACK_URL') ?? ''}?bookingId=${booking_id}&reference=${reference}`;
   const mobileCallbackUrl = `kajola://payment-success?bookingId=${booking_id}&reference=${reference}`;
-  const paymentUrl = await createProviderCheckout(provider, reference, finalAmount, currency, callbackUrl, mobileCallbackUrl);
 
   const { data: payment, error } = await supabase
     .from('payments')
@@ -79,32 +90,46 @@ async function initiatePayment(supabase: ReturnType<typeof createSupabaseClient>
       provider,
       provider_reference: reference,
       reference,
-      discount_cents: discount.amount,
-      discount_code: discount_code ?? null,
-      platform_fee_cents: platformFee,
-      net_amount_cents: netAmount,
+      discount_cents: quote.discount,
+      discount_code: null,
+      platform_fee_cents: quote.kajola_gross_revenue,
+      net_amount_cents: quote.provider_net_entitlement,
+      payment_arrangement: quote.payment_arrangement,
+      payment_method: paymentMethod,
+      expected_amount: finalAmount,
+      outstanding_amount: quote.amount_outstanding,
+      verification_state: offline ? 'PENDING' : 'PENDING',
+      quote_snapshot_id: quote.id,
+      purpose: paymentPurpose,
       status: 'initialized',
       metadata: { initiated_by: auth.sub, callback_url: callbackUrl, mobile_callback_url: mobileCallbackUrl }
     })
     .select()
     .single();
   if (error || !payment) throw new ApiError(error?.message ?? 'Failed to create payment record', 500);
-
-  if (discount.id) {
-    await supabase.from('discount_codes').update({ used_count: discount.used_count + 1 }).eq('id', discount.id);
+  let paymentUrl = `/dashboard/bookings/${booking_id}?payment=offline`;
+  if (!offline) {
+    try {
+      paymentUrl = await createProviderCheckout(provider, reference, finalAmount, currency, callbackUrl, mobileCallbackUrl);
+    } catch (error) {
+      await supabase.from('payments').update({ status: 'failed', verification_state: 'FAILED' }).eq('id', payment.id);
+      throw error;
+    }
   }
 
   const { data: updatedBooking, error: updateError } = await supabase
     .from('bookings')
-    .update({ status: ['held', 'pending'].includes(booking.status) ? 'awaiting_payment' : booking.status,
-      booking_state: ['held', 'pending'].includes(booking.status) ? 'PENDING_PAYMENT' : booking.booking_state,
-      payment_state: 'INTENT_CREATED', total_amount: finalAmount, payment_reference: reference })
+    .update({ status: offline ? 'confirmed' : ['held', 'pending'].includes(booking.status) ? 'awaiting_payment' : booking.status,
+      booking_state: offline ? 'CONFIRMED' : ['held', 'pending'].includes(booking.status) ? 'PENDING_PAYMENT' : booking.booking_state,
+      payment_state: offline ? 'NOT_REQUIRED' : 'INTENT_CREATED', fulfillment_state: offline ? 'SCHEDULED' : booking.fulfillment_state,
+      hold_state: offline ? 'CONVERTED' : booking.hold_state, reconciliation_state: offline ? 'PENDING' : booking.reconciliation_state,
+      total_amount: quote.customer_total, payment_reference: reference })
     .eq('id', booking_id)
     .select()
     .single();
   if (updateError) throw new ApiError(updateError.message, 500);
 
-  return json({ payment, booking: updatedBooking, payment_url: paymentUrl });
+  return json({ payment, booking: updatedBooking, payment_url: paymentUrl, authorization_url: paymentUrl, reference });
 }
 
 async function loadTenantForBooking(supabase: ReturnType<typeof createSupabaseClient>, tenantId: string) {

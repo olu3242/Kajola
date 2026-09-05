@@ -132,8 +132,11 @@ kajola/
 ├── supabase/
 │   ├── migrations/                 # Reference migrations (SORF baseline schema)
 │   └── functions/
-│       ├── book-slot/index.ts      # SORF hold-state Edge Function reference implementation
-│       └── confirm-payment/index.ts  # SORF Paystack webhook (HMAC → held→confirmed + loyalty)
+│       ├── bookings/index.ts       # Canonical transactional booking and fulfillment boundary
+│       ├── payments/index.ts       # Canonical payment-intent and server-verification boundary
+│       ├── payments_webhook/index.ts # Canonical provider webhook boundary
+│       ├── book-slot/index.ts      # Retired compatibility endpoint (HTTP 410)
+│       └── confirm-payment/index.ts  # Retired compatibility endpoint (HTTP 410)
 ├── scripts/
 │   ├── check-example.sh            # SORF compliance validator for individual example files (50 checks)
 │   ├── run-evals.sh                # Eval runner: print prompts + assertions for manual testing

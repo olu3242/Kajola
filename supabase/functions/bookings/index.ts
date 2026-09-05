@@ -84,12 +84,58 @@ async function handleGetBooking(supabase: ReturnType<typeof createSupabaseClient
     return errorResponse('Forbidden', 403);
   }
 
-  return json({ booking });
+  const { data: quote, error: quoteError } = await supabase
+    .from('quote_snapshots')
+    .select('*')
+    .eq('id', booking.quote_snapshot_id)
+    .single();
+  if (quoteError || !quote) {
+    return errorResponse('Immutable commerce snapshot not found', 409);
+  }
+
+  const successfulPayments = (booking.payments ?? []).filter((payment: any) =>
+    payment.status === 'successful' && String(payment.purpose ?? '').toUpperCase() !== 'TIP'
+  );
+  const previouslyPaid = successfulPayments.reduce(
+    (sum: number, payment: any) => sum + Number(payment.amount_cents ?? payment.amount ?? 0),
+    0,
+  );
+  const remaining = Math.max(0, Number(quote.customer_total) - previouslyPaid);
+  const arrangement = String(quote.payment_arrangement ?? 'FULL').toUpperCase();
+  const purpose = previouslyPaid > 0
+    ? 'balance'
+    : ['DEPOSIT', 'PARTIAL'].includes(arrangement) ? 'deposit' : 'full';
+  const subtotalDue = purpose === 'deposit'
+    ? Math.min(remaining, Number(quote.amount_due_now))
+    : remaining;
+  const methods = ['bank_transfer', 'card', 'ussd', 'bank_account', 'payment_link', 'pay_at_venue', 'cash'];
+
+  return json({
+    booking: {
+      ...booking,
+      provider_name: booking.artisans?.business_name,
+      service_name: booking.services?.name,
+    },
+    quote: {
+      policy_version: quote.policy_version,
+      currency: quote.currency,
+      purpose,
+      service_amount_kobo: Number(quote.service_base) + Number(quote.add_ons) - Number(quote.discount),
+      previously_paid_kobo: previouslyPaid,
+      subtotal_due_kobo: subtotalDue,
+      gateway_fee_kobo: 0,
+      platform_fee_kobo: Number(quote.kajola_gross_revenue),
+      customer_total_kobo: subtotalDue,
+      provider_net_kobo: Number(quote.provider_net_entitlement),
+      balance_after_payment_kobo: Math.max(0, remaining - subtotalDue),
+      methods,
+    },
+  });
 }
 
 async function handleUpdateBookingStatus(supabase: ReturnType<typeof createSupabaseClient>, auth: any, bookingId: string, body: any) {
   const { status } = body;
-  const allowedStatuses = ['pending', 'awaiting_payment', 'paid', 'confirmed', 'in_progress', 'completed', 'cancelled'];
+  const allowedStatuses = ['acknowledged', 'checked_in', 'in_progress', 'completed', 'cancelled', 'no_show', 'disputed'];
   if (!status || !allowedStatuses.includes(status)) {
     return errorResponse('Invalid status', 400);
   }
@@ -111,25 +157,33 @@ async function handleUpdateBookingStatus(supabase: ReturnType<typeof createSupab
     if (status !== 'cancelled') {
       return errorResponse('Clients may only cancel bookings', 403);
     }
-    if (!['pending', 'awaiting_payment', 'confirmed', 'in_progress'].includes(booking.status)) {
+    if (!['pending', 'held', 'awaiting_payment', 'confirmed'].includes(booking.status)) {
       return errorResponse('This booking cannot be cancelled', 409);
     }
   } else if (auth.role === 'tenant_admin') {
     if (booking.tenant_id !== auth.tenant_id) {
       return errorResponse('Forbidden', 403);
     }
+  } else if (auth.role === 'artisan') {
+    const { data: artisan } = await supabase.from('artisans').select('id').eq('id', booking.artisan_id).eq('user_id', auth.sub).maybeSingle();
+    if (!artisan) return errorResponse('Forbidden', 403);
   } else {
     return errorResponse('Forbidden', 403);
   }
 
-  const updatePayload: Record<string, unknown> = { status };
-  if (status === 'cancelled') updatePayload.cancellation_reason = body.reason ?? 'Cancelled by user';
-  const { data: updated, error: updateError } = await supabase
-    .from('bookings')
-    .update(updatePayload)
-    .eq('id', bookingId)
-    .select('*, services(name, price_cents, currency), artisans(business_name), payments(*), escrow_accounts(*), reviews(id,rating)')
-    .single();
+  const stateMap: Record<string,string> = { acknowledged: 'PROVIDER_ACKNOWLEDGED', checked_in: 'CUSTOMER_CHECKED_IN', in_progress: 'IN_PROGRESS', completed: 'COMPLETED', cancelled: 'CANCELLED', no_show: 'NO_SHOW', disputed: 'DISPUTED' };
+  const actorRole = auth.role === 'client' ? 'CUSTOMER' : auth.role === 'artisan' ? 'PROVIDER' : 'TENANT_ADMIN';
+  const requestKey = String(body.idempotency_key ?? `fulfillment:${bookingId}:${stateMap[status]}:${auth.sub}`);
+  const correlationId = String(body.correlation_id ?? crypto.randomUUID());
+  const { data: transitioned, error: updateError } = await supabase.rpc('transition_booking_fulfillment', {
+    target_booking_id: bookingId, target_state: stateMap[status], target_actor_id: auth.sub,
+    target_actor_role: actorRole, target_reason_code: body.reason_code ?? body.reason ?? 'USER_REQUEST',
+    target_correlation_id: correlationId, request_key: requestKey,
+  });
+  const transitionedBooking = Array.isArray(transitioned) ? transitioned[0] : transitioned;
+  const { data: updated } = transitionedBooking
+    ? await supabase.from('bookings').select('*, services(name, price_cents, currency), artisans(business_name), payments(*), escrow_accounts(*), reviews(id,rating)').eq('id', bookingId).single()
+    : { data: null };
 
   if (updateError || !updated) {
     return errorResponse(updateError?.message ?? 'Could not update status', 500);
@@ -140,20 +194,40 @@ async function handleUpdateBookingStatus(supabase: ReturnType<typeof createSupab
       .from('booking_slots')
       .update({ status: 'available', held_by_user_id: null, booking_id: null })
       .eq('id', booking.slot_id);
-    await supabase.from('payments').update({ status: 'failed' }).eq('booking_id', bookingId).neq('status', 'successful');
+    const { data: successfulPayment } = await supabase.from('payments').select('id,amount_cents').eq('booking_id', bookingId).eq('status', 'successful').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    await supabase.from('cancellation_decisions').upsert({ tenant_id: booking.tenant_id, booking_id: booking.id,
+      cancelled_by: auth.role === 'client' ? 'CUSTOMER' : 'PROVIDER', actor_id: auth.sub, policy_version: 'cancellation-v1',
+      cancellation_fee: 0, refund_amount: successfulPayment?.amount_cents ?? 0,
+      recovery_required: auth.role !== 'client', reason_code: body.reason_code ?? 'USER_REQUEST',
+      idempotency_key: `cancellation:${booking.id}:${auth.sub}` }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
+    if (auth.role !== 'client') {
+      await supabase.from('recovery_cases').upsert({ tenant_id: booking.tenant_id, booking_id: booking.id,
+        payment_id: successfulPayment?.id ?? null, failure_reason: 'PROVIDER_CANCELLATION', original_slot_id: booking.slot_id,
+        state: 'REQUIRED', policy_version: 'recovery-v1', correlation_id: correlationId,
+      }, { onConflict: 'booking_id,failure_reason', ignoreDuplicates: true });
+      await supabase.from('bookings').update({ recovery_state: 'REQUIRED', settlement_state: 'HELD' }).eq('id', booking.id);
+    }
+  }
+
+  if (status === 'completed') {
+    const entitlement = await supabase.rpc('freeze_provider_entitlement', { target_booking_id: bookingId });
+    if (entitlement.error) return errorResponse(entitlement.error.message, 500);
+    await supabase.rpc('evaluate_booking_settlement', { target_booking_id: bookingId });
   }
 
   return json({ booking: updated });
 }
 
 async function handleCreateBooking(supabase: ReturnType<typeof createSupabaseClient>, auth: any, body: any) {
-  const { slot_id, service_id, artisan_id, staff_id, notes, payment_mode = 'instant' } = body;
+  const { slot_id, service_id, artisan_id, staff_id, notes, payment_mode = 'instant', payment_arrangement = 'DEPOSIT', payment_method = 'bank_transfer' } = body;
   if (!slot_id || !service_id || !artisan_id) {
     return errorResponse('slot_id, service_id, and artisan_id are required', 400);
   }
   if (!['instant', 'escrow'].includes(payment_mode)) {
     return errorResponse('Invalid payment mode', 400);
   }
+  if (!['FULL','DEPOSIT','PARTIAL','PAY_AT_SERVICE','CASH'].includes(payment_arrangement)) return errorResponse('Invalid payment arrangement', 400);
+  if (!['card','bank_transfer','payment_link','ussd','bank_account','pay_at_venue','cash'].includes(payment_method)) return errorResponse('Invalid payment method', 400);
 
   const client_id = auth.sub as string;
   const tenant_id = auth.tenant_id as string;
@@ -185,6 +259,10 @@ async function handleCreateBooking(supabase: ReturnType<typeof createSupabaseCli
   if (serviceError || !service) {
     return errorResponse('Service not found', 404);
   }
+  const { data: tenant } = await supabase.from('tenants').select('platform_fee_percent').eq('id', tenant_id).single();
+  const platformFee = Math.max(0, Math.round(Number(service.price_cents) * Number(tenant?.platform_fee_percent ?? 0) / 100));
+  const dueNow = payment_arrangement === 'FULL' ? Number(service.price_cents)
+    : payment_arrangement === 'DEPOSIT' || payment_arrangement === 'PARTIAL' ? Math.ceil(Number(service.price_cents) * 0.3) : 0;
 
   const suppliedKey = String(body.idempotency_key ?? '');
   const requestKey = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(suppliedKey)
@@ -197,7 +275,15 @@ async function handleCreateBooking(supabase: ReturnType<typeof createSupabaseCli
   const { data: quote, error: quoteError } = await supabase.from('quote_snapshots').insert({
     tenant_id, slot_id, service_id, customer_id: client_id, currency: service.currency ?? 'NGN',
     subtotal: service.price_cents, discount: 0, customer_fee: 0, total: service.price_cents,
-    pricing_version: 'booking-v1', expires_at: quoteExpiry,
+    pricing_version: 'booking-v2', policy_version: 'ng-commerce-v1', expires_at: quoteExpiry,
+    payment_arrangement, payment_method, service_base: service.price_cents, add_ons: 0,
+    service_price: service.price_cents, customer_total: service.price_cents,
+    provider_fee: platformFee, payment_processing_cost: 0, transfer_cost: 0, settlement_cost: 0,
+    tax_if_applicable: 0, tip: 0, subsidy: 0, recovery_credit: 0,
+    amount_due_now: dueNow, amount_due_at_service: Number(service.price_cents) - dueNow,
+    amount_paid: 0, amount_outstanding: service.price_cents,
+    provider_gross_entitlement: service.price_cents, provider_net_entitlement: Number(service.price_cents) - platformFee,
+    kajola_gross_revenue: platformFee, kajola_net_revenue: platformFee, settlement_amount: Number(service.price_cents) - platformFee,
   }).select('id').single();
   if (quoteError || !quote) return errorResponse(quoteError?.message ?? 'Could not persist quote', 500);
 
@@ -214,7 +300,7 @@ async function handleCreateBooking(supabase: ReturnType<typeof createSupabaseCli
   const bookingId = Array.isArray(held) ? held[0]?.id : held.id;
   const { data: booking, error: updateError } = await supabase.from('bookings').update({
     user_id: client_id, payment_mode, total_amount: service.price_cents, notes,
-    metadata: { quote_snapshot_id: quote.id, pricing_version: 'booking-v1' },
+    metadata: { quote_snapshot_id: quote.id, pricing_version: 'booking-v2', payment_arrangement, payment_method },
   }).eq('id', bookingId).select('*').single();
   if (updateError || !booking) return errorResponse(updateError?.message ?? 'Booking hold persisted but response could not be loaded', 500);
   return json({ booking, quote: { id: quote.id, expires_at: quoteExpiry } });
