@@ -22,13 +22,13 @@
 
 - Golden flow: web booking hold → deposit → confirmation → parallel effects → fulfilment → completion → review/settlement coordination → Definition of Done.
 - Automated tests: `tests/unit/orchestration.test.ts` and `apps/web/tests/e2e/connected-runtime.spec.ts`.
-- Latest R1 evidence: 57/57 unit/integration assertions, 38/38 production-server Playwright scenarios, 7/7 workspace typechecks, 75 generated pages, and 18/18 migration files accepted by the safety validator.
+- Latest local R1 evidence (2026-09-05): 83/83 unit/integration assertions, 38/38 local-mode production-server Playwright scenarios, 7/7 workspace typechecks, 79 generated pages, and 20/20 migration files accepted by the safety validator. Web lint also passed; the root package has no lint script.
 - Production schema: `20260904000000_flow_orchestration_os.sql`.
 - Operator trace: `/api/operator/flows?flowId=...`.
 
 ## Gaps
 
-- P0: linked Supabase migration/lint, worker/timer deployment, live RLS/race tests, restart persistence, and production golden-flow execution. Repository and worker implementations are present but not deployed.
+- P0: restore CLI authorization/project visibility, confirm exposed-password rotation, link Supabase, verify pooler transport, inspect/dry-run/apply migrations, deploy worker/timers, and execute live RLS/race/restart/golden-flow tests. Repository and worker implementations are present but not deployed.
 - P0 security: the production dependency audit has no critical findings after upgrading Next.js to 14.2.35, but 16 high and 17 moderate transitive findings remain; clearing them requires planned Next/Expo/React Native major upgrades.
 - P1: intent-named booking transition APIs, human task UI, dead-letter control, webhook-to-flow production adapter, restart/concurrency failure injection.
 - P2: agent provider adapter, dynamic rule authoring, richer bottleneck metrics.
@@ -40,4 +40,4 @@
 
 `R1_SUPABASE_READY_WITH_EXTERNAL_BLOCKER`
 
-The durable activation code is locally verified and fails closed. Production certification is withheld because the linked project returns HTTP 401 and local Docker is unavailable; migration application, live RLS, concurrent database execution and restart persistence have not been claimed as passes.
+The durable activation code is locally verified and fails closed. Production certification is withheld because repeated `supabase projects list` execution returned `Unauthorized` on 2026-09-05, the expected project could not be verified, the replacement database credential was disclosed and requires rotation again, and the connected-runtime environment is absent. The disclosed credential was not used. Migration application, live RLS, concurrent database execution, and restart persistence have not been claimed as passes.

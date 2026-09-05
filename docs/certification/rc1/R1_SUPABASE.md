@@ -4,13 +4,29 @@
 
 `R1_SUPABASE_READY_WITH_EXTERNAL_BLOCKER`
 
-The durable implementation and offline regression gates are ready. Live migration application, database-executed RLS assertions, the two-session slot race, and restart persistence remain `BLOCKED_EXTERNAL` because the linked Supabase CLI session returns HTTP 401 and no database password is present. Local Supabase is also unavailable because Docker Desktop is not running. No credential or production result was fabricated.
+The durable implementation and offline regression gates are ready. Live migration application, database-executed RLS assertions, the two-session slot race, and restart persistence remain `BLOCKED_EXTERNAL`. On 2026-09-05, Supabase CLI 2.109.1 returned `Unauthorized` from `projects list`, so project visibility and authorization could not be established. The database path was stopped before project link, pooler, password, or migration commands, as required. No credential or production result was fabricated.
+
+## Connection recovery checkpoint — 2026-09-05
+
+| Boundary | Result |
+|---|---|
+| Exposed database password rotated | `REQUIRED AGAIN` — the replacement credential was disclosed in the recovery request and was not used |
+| CLI executable | `PASS` — version 2.109.1 |
+| CLI authentication/project visibility | `FAIL` — `Unauthorized` |
+| Expected project `vzshucsacgrpuuzjondq` visible | `NOT VERIFIED` |
+| Project link | `NOT ATTEMPTED` — authorization stop gate |
+| Pooler host/TCP/Postgres | `NOT ATTEMPTED` |
+| Remote migration count/history | `UNKNOWN` |
+| Dry run/application | `NOT ATTEMPTED` |
+| Active app environment | Supabase URL, anon key, service role, runtime mode, and flow worker token all `MISSING` |
+
+Classification: `PROJECT_AUTHORIZATION_FAILURE`. A fresh `git fetch origin` succeeded, Supabase CLI 2.109.1 executed successfully, and a repeated `projects list` still returned `Unauthorized`; this isolates the current stop to Supabase CLI authentication/authorization rather than general network reachability. Connection goal `SUPABASE_CONNECTION_RECOVERED` is not achieved, so `R1_SUPABASE_DURABILITY_CERTIFICATION_RESUMED` is not achieved.
 
 ## Git baseline
 
 - Branch: `feat/kajola-connected-runtime-frontdoor`
-- Baseline SHA: `6ffa87878c2cd46d1a59b97002ba8eedd50798fc`
-- Worktree: dirty; the existing Flow Orchestration OS work and R1 activation remain uncommitted during certification.
+- Baseline SHA: `df87ad5a39c62e9e609358b443ebba29de8bd2dc`
+- Worktree: dirty before this checkpoint because of an existing user change in `apps/mobile/package.json`; that change was preserved.
 
 ## Forward migrations
 
@@ -65,22 +81,24 @@ The protected readiness endpoint reports only non-secret state: runtime mode, da
 | Explicit orchestration typecheck | passed |
 | Explicit web typecheck | passed |
 | Web lint | passed, zero warnings/errors |
-| Unit/integration | 57/57 tests, 6/6 files passed |
+| Unit/integration | 83/83 tests, 8/8 files passed |
 | Orchestration subset | 8/8 passed |
 | R1 durability subset | 4/4 passed |
-| Migration validation | 18/18 passed |
-| Production build | 6/6 tasks; 75 pages generated |
-| Targeted Playwright | 15/15 passed |
+| Migration validation | 20/20 migrations passed |
+| Production build | 6/6 tasks; 79 static pages generated |
+| Root lint command | missing from root `package.json` |
+| Targeted Playwright | not run separately; covered by full suite |
 | Full Playwright | 38/38 passed |
-| `git diff --check` | passed; Windows line-ending notices only |
+
+These are local/offline gates. Playwright explicitly sets `KAJOLA_RUNTIME_MODE=local`; none of these results is evidence of live Supabase connectivity, database-executed RLS, or restart durability.
 
 ## External blockers
 
-1. `supabase migration list` reaches project `vzshucsacgrpuuzjondq` but returns HTTP 401 and requests `SUPABASE_DB_PASSWORD`.
-2. No `.env` or `.env.local` supplies connected credentials.
-3. `supabase status` cannot inspect a local stack because the Docker Desktop Linux engine is unavailable.
-4. Therefore migration application, live SQL slot fixture, live RLS tests, and restart/reload persistence cannot be certified.
+1. The replacement database credential was disclosed in the 2026-09-05 recovery request and must be rotated again. It was not used by this certification run.
+2. A repeated `supabase projects list` returns `Unauthorized`; the expected project is therefore not currently visible or authorized through the CLI session despite the stated reauthentication prerequisite.
+3. No `.env` or `.env.local` exists; the active process has no Supabase URL, anon key, service-role key, runtime mode, or flow-worker token.
+4. Pooler transport, remote migration history, migration application, live SQL slot fixture, live RLS tests, and restart/reload persistence cannot be certified.
 
 ## Required live closeout
 
-Authenticate the Supabase CLI without placing secrets in source control, verify migration history, apply only unapplied forward migrations, run `tests/integration/rc1_slot_constraint.sql` in sandbox, execute cross-tenant/customer RLS fixtures, create business/quote/booking/flow records, restart the runtime, and prove the same record IDs reload.
+Rotate the exposed database password in the Supabase Dashboard and authenticate the CLI account that can see `vzshucsacgrpuuzjondq`. Then re-run project visibility and project link before collecting the exact Session Pooler host. Keep the new password only in secure session storage, verify TCP/Postgres, inspect remote migration history, dry-run, and apply only unapplied forward migrations. Finally run `tests/integration/rc1_slot_constraint.sql` in sandbox, execute cross-tenant/customer RLS fixtures, create business/quote/booking/flow records, restart the runtime, and prove the same record IDs reload.

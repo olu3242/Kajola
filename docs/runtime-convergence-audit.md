@@ -2,6 +2,10 @@
 
 This audit maps the current P0 UI to its real execution path. `local adapter` means deterministic, process-persistent test/development state; production routes proxy to Supabase Functions. A local adapter result is not production database certification.
 
+## Supabase recovery checkpoint — 2026-09-05
+
+Supabase CLI 2.109.1 is installed, but repeated `supabase projects list` execution returned `Unauthorized`. A simultaneous `git fetch origin` succeeded, isolating the stop to Supabase CLI authentication/authorization rather than general network reachability. This is classified as `PROJECT_AUTHORIZATION_FAILURE`; project link, pooler transport, Postgres authentication, migration history, dry-run, and application were not attempted. The replacement database credential was disclosed in the recovery request and must be rotated again; it was not used. The active runtime also has none of the required connected Supabase/runtime variables present. Fresh local gates passed: 7/7 workspace typechecks, 83/83 Vitest assertions, 20/20 migration validations, web lint, 6/6 build tasks, and 38/38 Playwright scenarios. Playwright ran in local mode and is not live durability or RLS evidence.
+
 | UI intent | API/action | Canonical owner | Repository/table | Event/workflow/audit | UI consequence | Current result |
 | --- | --- | --- | --- | --- | --- | --- |
 | Landing search/category/location | `GET /api/artisans` | Marketplace query | provider/service/location adapter; production function | read-only telemetry pending | URL-backed discovery results | Connected; production persistence depends on Supabase |
@@ -58,6 +62,6 @@ The code path is now `R1_SUPABASE_READY_WITH_EXTERNAL_BLOCKER`:
 - Consumer/provider/platform RLS definitions were tightened; blanket tenant access was removed from private commerce state.
 - Payment webhooks are signed, verified, durably deduplicated and ledger-producing.
 
-Live migration, RLS, race and restart execution remain blocked by Supabase HTTP 401 and the unavailable local Docker engine. See `docs/certification/rc1/R1_SUPABASE.md`.
+Live migration, RLS, race and restart execution remain blocked by the current Supabase CLI `Unauthorized` response and missing connected-runtime environment. See `docs/certification/rc1/R1_SUPABASE.md`.
 
 Current honest decision: `R1_SUPABASE_READY_WITH_EXTERNAL_BLOCKER`.
