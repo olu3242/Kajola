@@ -40,4 +40,4 @@
 
 `R1_SUPABASE_READY_WITH_EXTERNAL_BLOCKER`
 
-The durable activation code is locally verified and fails closed. Production certification is withheld because repeated `supabase projects list` execution returned `Unauthorized` on 2026-09-05, the expected project could not be verified, the replacement database credential was disclosed and requires rotation again, and the connected-runtime environment is absent. The disclosed credential was not used. Migration application, live RLS, concurrent database execution, and restart persistence have not been claimed as passes.
+The durable activation code is locally verified and fails closed. Production certification is withheld because post-rotation `supabase projects list` execution still returned `Unauthorized` on 2026-09-05, the expected project could not be verified, and the connected-runtime environment is absent. The user confirmed rotating the disclosed replacement credential again; the new credential was not provided to or used by this run. Migration application, live RLS, concurrent database execution, and restart persistence have not been claimed as passes.

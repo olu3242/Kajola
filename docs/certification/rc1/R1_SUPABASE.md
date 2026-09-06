@@ -10,7 +10,7 @@ The durable implementation and offline regression gates are ready. Live migratio
 
 | Boundary | Result |
 |---|---|
-| Exposed database password rotated | `REQUIRED AGAIN` — the replacement credential was disclosed in the recovery request and was not used |
+| Exposed database password rotated | `CONFIRMED` by the user after the replacement credential disclosure; the new credential was not provided to or used by this run |
 | CLI executable | `PASS` — version 2.109.1 |
 | CLI authentication/project visibility | `FAIL` — `Unauthorized` |
 | Expected project `vzshucsacgrpuuzjondq` visible | `NOT VERIFIED` |
@@ -94,8 +94,8 @@ These are local/offline gates. Playwright explicitly sets `KAJOLA_RUNTIME_MODE=l
 
 ## External blockers
 
-1. The replacement database credential was disclosed in the 2026-09-05 recovery request and must be rotated again. It was not used by this certification run.
-2. A repeated `supabase projects list` returns `Unauthorized`; the expected project is therefore not currently visible or authorized through the CLI session despite the stated reauthentication prerequisite.
+1. Password rotation after the replacement credential disclosure was user-confirmed on 2026-09-05; no credential was provided to or used by this run.
+2. A post-rotation `supabase projects list` still returns `Unauthorized`; the expected project is therefore not currently visible or authorized through the CLI session despite the stated reauthentication prerequisite.
 3. No `.env` or `.env.local` exists; the active process has no Supabase URL, anon key, service-role key, runtime mode, or flow-worker token.
 4. Pooler transport, remote migration history, migration application, live SQL slot fixture, live RLS tests, and restart/reload persistence cannot be certified.
 
