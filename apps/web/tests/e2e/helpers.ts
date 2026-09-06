@@ -4,6 +4,7 @@ import { Page, BrowserContext } from '@playwright/test';
 export const TEST_CLIENT  = { phone: '+2348012345678',  otp: '123456', id: 'client-1', role: 'client' };
 export const TEST_ARTISAN = { phone: '+2348011111001',  otp: '123456', id: 'ada-1',    role: 'artisan' }; // Ada
 export const TEST_OWNER   = { phone: '+2348098765432',  otp: '123456', id: 'owner-1',  role: 'owner' };
+export const TEST_ADMIN   = { phone: '+2348000000001',  otp: '123456', id: 'admin-1',  role: 'admin' };
 
 /** Log in a user via the API and inject the session cookie */
 export async function loginAs(context: BrowserContext, user: typeof TEST_CLIENT) {

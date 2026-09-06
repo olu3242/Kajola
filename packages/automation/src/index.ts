@@ -5,7 +5,7 @@
 
 /** SORF baseline booking lifecycle events */
 export type SorfBookingEventType =
-  | 'booking.held'        // slot hold created (15-min optimistic hold)
+  | 'booking.held'        // slot hold created (fixed five-minute hold)
   | 'booking.confirmed'   // deposit paid or free booking confirmed
   | 'booking.checked_in'  // customer arrived; staff marked checked-in
   | 'booking.started'     // service in progress (in_progress state)
@@ -16,7 +16,7 @@ export type SorfBookingEventType =
 
 /** SORF payment lifecycle events */
 export type SorfPaymentEventType =
-  | 'payment.confirmed'   // payment provider webhook: success
+  | 'payment.succeeded'   // payment provider webhook: success
   | 'payment.failed'      // payment provider webhook: failure
   | 'payment.refund_initiated'; // refund started (cancellation or no-show reversal)
 
@@ -86,10 +86,9 @@ export type AutomationActionType =
   | 'send_whatsapp'
   | 'send_email'
   | 'webhook'
-  | 'update_record'
   | 'create_notification'
   | 'credit_loyalty_points'
-  | 'initiate_payout'
+  | 'create_operator_request'
   | 'enqueue_job';
 
 export type AutomationAction = {

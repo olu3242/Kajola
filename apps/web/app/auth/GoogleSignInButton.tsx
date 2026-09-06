@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
+import { Alert, Button } from '../components/ui';
 
 export default function GoogleSignInButton({ label = 'Continue with Google' }: { label?: string }) {
   const [loading, setLoading] = useState(false);
@@ -31,25 +32,17 @@ export default function GoogleSignInButton({ label = 'Continue with Google' }: {
   }
 
   return (
-    <div style={{ marginTop: 24, maxWidth: 420 }}>
-      <button
+    <div style={{ marginTop: 'var(--space-5)' }}>
+      <Button
         type="button"
         onClick={handleGoogleSignIn}
         disabled={loading}
-        style={{
-          width: '100%',
-          padding: '14px 18px',
-          borderRadius: 10,
-          border: '1px solid #D1D5DB',
-          background: loading ? '#F3F4F6' : '#FFFFFF',
-          color: '#111827',
-          fontWeight: 700,
-          cursor: loading ? 'not-allowed' : 'pointer'
-        }}
+        variant="outline"
+        block
       >
         {loading ? 'Opening Google…' : label}
-      </button>
-      {error ? <p style={{ marginTop: 12, color: '#B91C1C' }}>{error}</p> : null}
+      </Button>
+      {error ? <div style={{ marginTop: 'var(--space-3)' }}><Alert tone="error">{error}</Alert></div> : null}
     </div>
   );
 }

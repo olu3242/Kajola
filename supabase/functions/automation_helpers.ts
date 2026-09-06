@@ -6,6 +6,36 @@ export type AutomationAction = {
   config: Record<string, unknown>;
 };
 
+export type EventEnvelopeOptions = {
+  eventId?: string;
+  schemaVersion?: number;
+  workflowId?: string;
+  flowInstanceId?: string;
+  stepInstanceId?: string;
+  correlationId?: string;
+  causationId?: string;
+  actor?: Record<string, unknown>;
+  idempotencyKey?: string;
+};
+
+const canonicalEventAliases: Record<string, string> = {
+  booking_created: 'booking.created',
+  booking_confirmed: 'booking.confirmed',
+  booking_completed: 'booking.completed',
+  first_booking_completed: 'provider.first_booking_completed',
+  payment_successful: 'payment.succeeded',
+  review_created: 'review.submitted',
+  artisan_onboarded: 'provider.onboarded',
+  artisan_verified: 'provider.verified',
+  referral_completed: 'referral.completed',
+  subscription_started: 'subscription.started',
+  boost_activated: 'provider.boost_activated'
+};
+
+export function canonicalEventType(eventType: string) {
+  return canonicalEventAliases[eventType] ?? eventType;
+}
+
 export async function emitSystemEvent(
   supabase: SupabaseClient,
   tenant_id: string,
@@ -14,19 +44,29 @@ export async function emitSystemEvent(
   source = 'automation',
   createdBy = 'system',
   entityType?: string,
-  entityId?: string
+  entityId?: string,
+  envelope: EventEnvelopeOptions = {}
 ) {
-  const dedup_key = `${eventType}:${entityType ?? 'system'}:${entityId ?? crypto.randomUUID()}`;
+  const normalizedEventType = canonicalEventType(eventType);
+  const dedup_key = envelope.idempotencyKey ?? `${normalizedEventType}:${entityType ?? 'system'}:${entityId ?? envelope.eventId ?? crypto.randomUUID()}`;
   const row = {
+    ...(envelope.eventId ? { id: envelope.eventId } : {}),
     tenant_id,
-    event_type: eventType,
-    payload,
+    event_type: normalizedEventType,
+    payload: normalizedEventType === eventType ? payload : { ...payload, legacy_event_type: eventType },
     source,
     created_by: createdBy,
     entity_type: entityType ?? null,
     entity_id: entityId ?? null,
     status: 'pending',
-    dedup_key
+    dedup_key,
+    schema_version: envelope.schemaVersion ?? 1,
+    workflow_id: envelope.workflowId ?? null,
+    flow_instance_id: envelope.flowInstanceId ?? null,
+    step_instance_id: envelope.stepInstanceId ?? null,
+    correlation_id: envelope.correlationId ?? crypto.randomUUID(),
+    causation_id: envelope.causationId ?? null,
+    actor: envelope.actor ?? { type: 'SYSTEM', id: createdBy }
   };
 
   const { error } = await supabase.from('system_events').insert(row);
@@ -39,20 +79,21 @@ export async function executeAction(
   supabase: SupabaseClient,
   event: any,
   action: AutomationAction,
-  runAttempt: number
+  runAttempt: number,
+  idempotencyKey?: string
 ) {
   const config = resolveConfigObject(action.config, event);
   const actionType = action.action_type;
 
   switch (actionType) {
     case 'send_notification':
-      return sendNotificationAction(supabase, event, config as Record<string, unknown>);
+      return sendNotificationAction(supabase, event, config as Record<string, unknown>, idempotencyKey);
     case 'send_email':
       return sendEmailAction(supabase, event, config as Record<string, unknown>);
     case 'send_whatsapp':
       return sendWhatsAppAction(supabase, event, config as Record<string, unknown>);
     case 'update_record':
-      return updateRecordAction(supabase, event, config as Record<string, unknown>);
+      throw new ApiError('Arbitrary record mutation is forbidden for automation; use a policy-gated domain command', 403);
     case 'trigger_referral_reward':
     case 'trigger_reward':
       return triggerReferralRewardAction(supabase, event, config as Record<string, unknown>);
@@ -131,7 +172,7 @@ function getDeepValue(obj: any, path: string) {
   return current;
 }
 
-async function sendNotificationAction(supabase: SupabaseClient, event: any, config: any) {
+async function sendNotificationAction(supabase: SupabaseClient, event: any, config: any, idempotencyKey?: string) {
   const user_id = config.user_id || getDeepValue(event, 'payload.client_id') || getDeepValue(event, 'payload.artisan_id');
   if (!user_id) throw new ApiError('send_notification must include user_id or infer one from event payload', 400);
   const channel = (config.channel as string) ?? 'in_app';
@@ -145,8 +186,9 @@ async function sendNotificationAction(supabase: SupabaseClient, event: any, conf
     channel,
     title,
     body,
-    payload
-  });
+    payload,
+    idempotency_key: idempotencyKey ?? `automation:${event.id}:notification`
+  }, { onConflict: 'idempotency_key', ignoreDuplicates: true });
 
   if (error) throw new ApiError(error.message, 500);
   return { success: true, channel };
@@ -207,18 +249,6 @@ async function sendWhatsAppAction(supabase: SupabaseClient, event: any, config: 
   });
 
   return { success: true, channel: 'whatsapp' };
-}
-
-async function updateRecordAction(supabase: SupabaseClient, event: any, config: any) {
-  const table = config.table as string;
-  const recordId = config.record_id as string || getDeepValue(event, 'entity_id');
-  const data = config.data as Record<string, unknown>;
-
-  if (!table || !recordId || !data) throw new ApiError('update_record requires table, record_id, and data', 400);
-
-  const { error } = await supabase.from(table).update(data).eq('id', recordId);
-  if (error) throw new ApiError(error.message, 500);
-  return { success: true, table, record_id: recordId };
 }
 
 async function triggerReferralRewardAction(supabase: SupabaseClient, event: any, config: any) {

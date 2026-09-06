@@ -1,0 +1,145 @@
+[
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_000000_init_schema.sql",
+    "version": "20260424_000000",
+    "risk_level": "medium",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": true,
+    "rollback": null,
+    "reversible": true
+  },
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_010000_add_auth_otps.sql",
+    "version": "20260424_010000",
+    "risk_level": "low",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": false,
+    "rollback": null,
+    "reversible": true
+  },
+  {
+    "zero_downtime_approved": true,
+    "name": "20260424_020000_booking_payment_state_machine.sql",
+    "version": "20260424_020000",
+    "risk_level": "high",
+    "schema_flag": "booking_payment_state_machine_v2",
+    "destructive": true,
+    "requires_backup": true,
+    "rollback": "supabase/rollbacks/20260424_020000_booking_payment_state_machine.rollback.sql",
+    "reversible": false
+  },
+  {
+    "zero_downtime_approved": true,
+    "name": "20260424_030000_flexible_payment_modes.sql",
+    "version": "20260424_030000",
+    "risk_level": "high",
+    "schema_flag": "flexible_payment_modes_v1",
+    "destructive": true,
+    "requires_backup": true,
+    "rollback": "supabase/rollbacks/20260424_030000_flexible_payment_modes.rollback.sql",
+    "reversible": false
+  },
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_040000_trust_reputation_system.sql",
+    "version": "20260424_040000",
+    "risk_level": "medium",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": true,
+    "rollback": null,
+    "reversible": true
+  },
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_050000_intelligent_recommendations.sql",
+    "version": "20260424_050000",
+    "risk_level": "medium",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": true,
+    "rollback": null,
+    "reversible": true
+  },
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_060000_supply_growth_engine.sql",
+    "version": "20260424_060000",
+    "risk_level": "medium",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": true,
+    "rollback": null,
+    "reversible": true
+  },
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_070000_revenue_engine.sql",
+    "version": "20260424_070000",
+    "risk_level": "medium",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": true,
+    "rollback": null,
+    "reversible": true
+  },
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_080000_automation_engine.sql",
+    "version": "20260424_080000",
+    "risk_level": "medium",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": true,
+    "rollback": null,
+    "reversible": true
+  },
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_090000_operator_dashboard.sql",
+    "version": "20260424_090000",
+    "risk_level": "low",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": false,
+    "rollback": null,
+    "reversible": true
+  },
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_100000_migration_pipeline_tracking.sql",
+    "version": "20260424_100000",
+    "risk_level": "low",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": false,
+    "rollback": null,
+    "reversible": true
+  },
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_110000_migration_safety_hardening.sql",
+    "version": "20260424_110000",
+    "risk_level": "low",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": false,
+    "rollback": null,
+    "reversible": true
+  },
+  {
+    "zero_downtime_approved": false,
+    "name": "20260424_120000_enterprise_data_reliability.sql",
+    "version": "20260424_120000",
+    "risk_level": "medium",
+    "schema_flag": null,
+    "destructive": false,
+    "requires_backup": true,
+    "rollback": null,
+    "reversible": true
+  }
+]

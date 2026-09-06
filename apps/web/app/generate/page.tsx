@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
+import { KajolaLogoLink } from '../components/ui';
 
 const EXAMPLE_PROMPTS = [
   {
@@ -244,7 +245,7 @@ export default function GeneratePage() {
 
       {/* Nav */}
       <nav style={{ position: 'sticky', top: 0, zIndex: 50, background: 'rgba(13,19,33,.85)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #232E48', padding: '0 24px', height: 56, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <a href="/" style={{ fontFamily: 'monospace', fontWeight: 900, letterSpacing: '-.04em', fontSize: 18, color: '#C8911A' }}>Kajola</a>
+        <KajolaLogoLink className="kj-generator-logo" />
         <span style={{ fontSize: 12, color: '#7A8299', fontFamily: 'monospace' }}>Architecture Generator</span>
       </nav>
 

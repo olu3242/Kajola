@@ -23,7 +23,7 @@ function extractToken(req: NextRequest): string | null {
 
 export async function forwardToFunction(path: string, req: NextRequest) {
   if (!FUNCTIONS_URL) {
-    return NextResponse.json({ error: 'Backend service not configured' }, { status: 500 });
+    return NextResponse.json({ code: 'DEPENDENCY_UNAVAILABLE', error: 'Backend service not configured' }, { status: 503 });
   }
 
   const headers = new Headers({ 'Content-Type': 'application/json' });
@@ -43,13 +43,13 @@ export async function forwardToFunction(path: string, req: NextRequest) {
     const data = await response.json().catch(() => ({ error: 'Invalid upstream response' }));
     return NextResponse.json(data, { status: response.status });
   } catch {
-    return NextResponse.json({ error: 'Service unavailable' }, { status: 503 });
+    return NextResponse.json({ code: 'DEPENDENCY_UNAVAILABLE', error: 'Service unavailable' }, { status: 503 });
   }
 }
 
 export async function forwardToFunctionWithQuery(path: string, req: NextRequest) {
   if (!FUNCTIONS_URL) {
-    return NextResponse.json({ error: 'Backend service not configured' }, { status: 500 });
+    return NextResponse.json({ code: 'DEPENDENCY_UNAVAILABLE', error: 'Backend service not configured' }, { status: 503 });
   }
 
   const url   = new URL(req.url);
@@ -66,6 +66,6 @@ export async function forwardToFunctionWithQuery(path: string, req: NextRequest)
     const data = await response.json().catch(() => ({ error: 'Invalid upstream response' }));
     return NextResponse.json(data, { status: response.status });
   } catch {
-    return NextResponse.json({ error: 'Service unavailable' }, { status: 503 });
+    return NextResponse.json({ code: 'DEPENDENCY_UNAVAILABLE', error: 'Service unavailable' }, { status: 503 });
   }
 }

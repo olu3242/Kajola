@@ -18,7 +18,8 @@
       "@kajola/ui": ["packages/ui/src"],
       "@kajola/api": ["packages/api/src"],
       "@kajola/db": ["packages/db/src"],
-      "@kajola/automation": ["packages/automation/src"]
+      "@kajola/automation": ["packages/automation/src"],
+      "@kajola/orchestration": ["packages/orchestration/src"]
     }
   },
   "include": ["packages/**/*", "apps/**/*"],
@@ -26,6 +27,7 @@
     { "path": "packages/ui" },
     { "path": "packages/api" },
     { "path": "packages/db" },
-    { "path": "packages/automation" }
+    { "path": "packages/automation" },
+    { "path": "packages/orchestration" }
   ]
 }

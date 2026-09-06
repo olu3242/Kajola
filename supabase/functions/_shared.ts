@@ -55,10 +55,11 @@ export async function authenticateRequest(req: Request) {
 }
 
 export function handleError(err: unknown) {
-  console.error(err);
   if (err instanceof ApiError) {
+    console.error('Kajola API error', { status: err.status, category: err.message.split(':')[0] });
     return errorResponse(err.message, err.status);
   }
+  console.error('Kajola API error', { category: err instanceof Error ? err.name : 'UNKNOWN_ERROR' });
   return errorResponse('Internal server error', 500);
 }
 

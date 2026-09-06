@@ -69,6 +69,18 @@ export const ApiRoutes = {
     retryEvent: '/api/admin/events/retry',
     automationRules: '/api/admin/automation-rules',
   },
+  operator: {
+    runtime: '/api/operator/runtime',
+    flows: '/api/operator/flows',
+    flowTrace: (flowId: string) => `/api/operator/flows?flowId=${encodeURIComponent(flowId)}`,
+  },
+  ownerBusiness: {
+    aggregate: '/api/owner/business',
+    publish: '/api/owner/business?action=publish',
+  },
+  internal: {
+    flowWorker: '/api/internal/flow-worker',
+  },
 };
 
 export type ApiResponse<T> = {

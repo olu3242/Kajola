@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isLocalMode } from '@/lib/local-mode';
 import { submitGratuity } from '@/lib/local-handlers';
 import { getSessionUser } from '@/lib/session';
+import { forwardToFunction } from '../_proxy';
 
 export async function POST(req: NextRequest) {
   if (isLocalMode) {
@@ -15,6 +16,5 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ gratuity: result.gratuity }, { status: 201 });
   }
-  // No upstream equivalent yet
-  return NextResponse.json({ error: 'Gratuity service not available in remote mode' }, { status: 501 });
+  return forwardToFunction('gratuities', req);
 }

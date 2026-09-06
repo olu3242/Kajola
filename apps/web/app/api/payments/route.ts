@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     if (!bookingId) {
       return NextResponse.json({ error: 'bookingId is required' }, { status: 400 });
     }
-    const result = await initPayment(user, bookingId);
+    const result = await initPayment(user, bookingId, body.method ?? 'bank_transfer', body.purpose);
     if (result.error) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }

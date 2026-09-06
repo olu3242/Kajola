@@ -1,5 +1,6 @@
 import { serve, json, errorResponse, createSupabaseClient, handleError } from '../_shared.ts';
 import { executeAction, matchConditions, normalizeActions } from '../automation_helpers.ts';
+import { runtimeRetryDecision } from '../runtime_helpers.ts';
 
 type SystemEvent = {
   id: string;
@@ -19,6 +20,18 @@ type AutomationRule = {
   action_type?: string;
   config?: Record<string, unknown>;
   actions?: Array<{ action_type: string; config: Record<string, unknown> }>;
+};
+
+const legacyEventAliases: Record<string, string> = {
+  'booking.created': 'booking_created',
+  'booking.confirmed': 'booking_confirmed',
+  'booking.completed': 'booking_completed',
+  'provider.first_booking_completed': 'first_booking_completed',
+  'payment.succeeded': 'payment_successful',
+  'review.submitted': 'review_created',
+  'provider.onboarded': 'artisan_onboarded',
+  'provider.verified': 'artisan_verified',
+  'referral.completed': 'referral_completed'
 };
 
 serve(async (req: Request) => {
@@ -70,10 +83,11 @@ async function processEvent(supabase: ReturnType<typeof createSupabaseClient>, e
     return 'skipped';
   }
 
+  const ruleEvents = [event.event_type, legacyEventAliases[event.event_type]].filter(Boolean) as string[];
   const { data: rules, error: rulesError } = await supabase
     .from('automation_rules')
     .select('*')
-    .eq('trigger_event', event.event_type)
+    .in('trigger_event', ruleEvents)
     .eq('is_active', true);
 
   if (rulesError) {
@@ -157,7 +171,7 @@ async function processRule(supabase: ReturnType<typeof createSupabaseClient>, ev
     const actionKey = action.config?.action_key ? String(action.config.action_key) : `${action.action_type}_${index}`;
 
     try {
-      await executeAction(supabase, event, action, runData.attempts);
+      await executeAction(supabase, event, action, runData.attempts, `automation:${event.tenant_id}:${event.id}:${rule.id}:${index}`);
       await logAction(supabase, event, rule, index, action.action_type, actionKey, 'completed', null, runData.attempts);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -177,9 +191,12 @@ async function processRule(supabase: ReturnType<typeof createSupabaseClient>, ev
 }
 
 async function updateEventStatus(supabase: ReturnType<typeof createSupabaseClient>, event: SystemEvent, status: string, errorMessage?: string) {
-  const retryCount = status === 'failed' ? Number(event.retry_count ?? 0) + 1 : Number(event.retry_count ?? 0);
-  const nextStatus = status === 'failed' && retryCount < 3 ? 'pending' : status;
-  const delaySeconds = Math.min(300, 2 ** retryCount * 30);
+  const decision = status === 'failed'
+    ? runtimeRetryDecision({ currentRetryCount: Number(event.retry_count ?? 0), failureClass: 'DEPENDENCY_FAILURE', policy: 'STANDARD_NETWORK_CALL' })
+    : { retryCount: Number(event.retry_count ?? 0), nextStatus: status, delaySeconds: 0 };
+  const retryCount = decision.retryCount;
+  const nextStatus = decision.nextStatus;
+  const delaySeconds = decision.delaySeconds;
   await supabase.from('system_events').update({
     status: nextStatus,
     retry_count: retryCount,

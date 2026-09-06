@@ -17,4 +17,6 @@ dist/
 **/.turbo/
 **/.expo/
 **/*.tsbuildinfo
+**/playwright-report/
+**/test-results/
 supabase/.temp/

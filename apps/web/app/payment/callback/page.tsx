@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 
 export default function PaymentCallbackPage() {
   const router = useRouter();
-  const [state,   setState]   = useState<'verifying' | 'success' | 'failed'>('verifying');
+  const [state,   setState]   = useState<'verifying' | 'success' | 'recovery' | 'failed'>('verifying');
   const [message, setMessage] = useState('Verifying payment…');
 
   useEffect(() => {
@@ -33,21 +33,26 @@ export default function PaymentCallbackPage() {
         return;
       }
 
-      setState('success');
-      setMessage('Payment confirmed! Your booking is confirmed.');
+      const needsRecovery = data.booking?.booking_state === 'REQUIRES_RECOVERY'
+        || data.booking?.recovery_state === 'REQUIRED' || data.booking?.recovery_state === 'AWAITING_CUSTOMER';
+      setState(needsRecovery ? 'recovery' : 'success');
+      setMessage(needsRecovery
+        ? 'Payment received. Your original slot is no longer available, but your money is protected. Choose an alternative or request a refund.'
+        : 'Payment confirmed! Your booking is confirmed.');
       setTimeout(() => router.replace(`/dashboard/bookings/${bookingId}`), 2000);
     }
     verify();
   }, [router]);
 
-  const bg = state === 'success' ? '#dcfce7' : state === 'failed' ? '#fef2f2' : '#f8fafc';
-  const color = state === 'success' ? '#166534' : state === 'failed' ? '#b91c1c' : '#374151';
+  const bg = state === 'success' ? '#dcfce7' : state === 'recovery' ? '#fffbeb' : state === 'failed' ? '#fef2f2' : '#f8fafc';
+  const color = state === 'success' ? '#166534' : state === 'recovery' ? '#92400e' : state === 'failed' ? '#b91c1c' : '#374151';
 
   return (
     <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F9FAFB' }}>
       <div style={{ padding: 32, borderRadius: 16, background: bg, maxWidth: 400, textAlign: 'center' }}>
         {state === 'verifying' && <div style={{ fontSize: 32 }}>⏳</div>}
         {state === 'success'   && <div style={{ fontSize: 32 }}>✅</div>}
+        {state === 'recovery'  && <div style={{ fontSize: 32 }}>🛡️</div>}
         {state === 'failed'    && <div style={{ fontSize: 32 }}>❌</div>}
         <p style={{ color, marginTop: 12, fontWeight: 600, fontSize: 16 }} data-testid="payment-status">{message}</p>
         {state === 'failed' && (

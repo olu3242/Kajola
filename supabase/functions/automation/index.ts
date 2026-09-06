@@ -101,7 +101,7 @@ async function createDefaultRules(supabase: ReturnType<typeof createSupabaseClie
   const rules = [
     {
       name: 'Notify artisan on booking creation',
-      trigger_event: 'booking_created',
+      trigger_event: 'booking.created',
       conditions: {},
       action_type: 'send_notification',
       config: {
@@ -113,7 +113,7 @@ async function createDefaultRules(supabase: ReturnType<typeof createSupabaseClie
     },
     {
       name: 'Send confirmation after payment',
-      trigger_event: 'payment_successful',
+      trigger_event: 'payment.succeeded',
       conditions: {},
       action_type: 'send_notification',
       config: {
@@ -125,7 +125,7 @@ async function createDefaultRules(supabase: ReturnType<typeof createSupabaseClie
     },
     {
       name: 'Request review after completion',
-      trigger_event: 'booking_completed',
+      trigger_event: 'booking.completed',
       conditions: {},
       action_type: 'send_notification',
       config: {
@@ -137,7 +137,7 @@ async function createDefaultRules(supabase: ReturnType<typeof createSupabaseClie
     },
     {
       name: 'Send onboarding tips to new artisans',
-      trigger_event: 'artisan_onboarded',
+      trigger_event: 'provider.onboarded',
       conditions: {},
       action_type: 'send_notification',
       config: {
@@ -149,7 +149,7 @@ async function createDefaultRules(supabase: ReturnType<typeof createSupabaseClie
     },
     {
       name: 'Notify artisan after first job complete',
-      trigger_event: 'first_booking_completed',
+      trigger_event: 'provider.first_booking_completed',
       conditions: {},
       action_type: 'send_notification',
       config: {
