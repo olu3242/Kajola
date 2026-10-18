@@ -61,7 +61,7 @@ export default function ArtisanWorkspacePage() {
           <a href="/logout"           style={{ color: '#ef4444' }}>Log out</a>
         </div>
       </div>
-      <p style={{ color: '#6B7280', marginTop: 4 }}>Today's bookings and actions</p>
+      <p style={{ color: '#6B7280', marginTop: 4 }}>Today&apos;s bookings and actions</p>
 
       {error && <p style={{ color: '#b91c1c', background: '#fef2f2', padding: 12, borderRadius: 8 }}>{error}</p>}
 
